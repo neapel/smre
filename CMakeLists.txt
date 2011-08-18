@@ -2,7 +2,11 @@ cmake_minimum_required(VERSION 2.8)
 project(SMRE)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
 
-include_directories("abstract", "include", "test")
+include_directories(
+	"abstract"
+	"include"
+	"src"
+)
 
 
 # MatIO libraries

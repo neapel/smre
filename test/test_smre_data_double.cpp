@@ -1,5 +1,4 @@
-
-#include "../src/smre_data_double.h"
+#include "smre_data_double.h"
 
 using namespace std;
 
