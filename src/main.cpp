@@ -8,8 +8,6 @@
 #include "matlab_io.h"
 #include "smre_data_double.h"
 
-#include "../test/test_smre_data_double.h"
-
 using namespace std;
 
 int main(int argc, char **argv) {
