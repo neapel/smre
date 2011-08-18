@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
 //	}
 
 
-	test_smre_data_double mytest;
+/*	test_smre_data_double mytest;
 	int mytest_res;
 
 	mytest_res = mytest.run(100);
@@ -58,15 +58,34 @@ int main(int argc, char **argv) {
 	else
 		cout << "I DON'T LIKE!!" << endl;
 
-
+*/
 
 	matlab_io io_object;
+
+	// c++ style
+	{
+	vector<smre_data_double> data;
+	io_object.read("../matfiles/test.mat", back_inserter(data));
+
+	for(int i = 0 ; i < data.size() ; i++ )
+		cout << data[i] << endl;
+
+	io_object.write("test-out1.mat", data.begin(), data.end());
+	}
+
+	// c style
+	{
 	int no_of_datasets_read;
 	int *dim_vec;
 	smre_data_double* datasets_read;
 
-	datasets_read = io_object.read_file("/home/klaus/work/codes/cpp/smre/matfiles/test.mat", no_of_datasets_read);
+	datasets_read = io_object.read_file("../matfiles/test.mat", no_of_datasets_read);
 
+	for(int i = 0 ; i < no_of_datasets_read ; i++)
+		cout << datasets_read[i] << endl;
+
+	io_object.write_file("test-out.mat", no_of_datasets_read, datasets_read);
+	}
 
 	cout << "BYE BYE!" << endl;
 

@@ -10,6 +10,8 @@
 
 #include "../src/smre_data_double.h"
 
+using namespace std;
+
 class test_smre_data_double {
 public:
 	int run(int no_of_runs) {
