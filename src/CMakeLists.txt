@@ -11,4 +11,4 @@ set(CMAKE_REQUIRED_LIBRARIES smre ${CMAKE_REQUIRED_LIBRARIES})
 # Executables using that library
 add_executable(main  main.cpp)
 target_link_libraries(main ${CMAKE_REQUIRED_LIBRARIES})
-add_dependencies(main smre)
+#add_dependencies(main smre)

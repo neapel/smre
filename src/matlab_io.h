@@ -1,9 +1,3 @@
-/*
- * matlab_io.h
- *
- *  Created on: 07.03.2011
- *      Author: pmarnitz
- */
 #ifndef MATLAB_IO_H_
 #define MATLAB_IO_H_
 
@@ -15,10 +9,18 @@
 #include "smre_data_double.h"
 
 
+
+/*! Matlab MAT-File access.
+ * Supports reading and writing multidimensional float/double-Arrays.
+ */
 class matlab_io : public smre_io {
 
 public:
-	// Writes arrays from the file to the OutputIterator<smre_data_double>.
+	/*! Writes all arrays from the file to the OutputIterator.
+	 * Inserts smre_data_double objects.
+	 * @param filename  The relative path to the MAT-file.
+	 * @param out  An OutputIterator, for example <code>back_inserter(some_vector)</code>.
+	 */
 	template<class It>
 	void read(std::string filename, It out) {
 		using namespace std;
@@ -60,7 +62,12 @@ public:
 	}
 
 
-	// Writes arrays from the Iterator<smre_data_double> to the file.
+	/*! Writes arrays from the ForwardIterator to the file.
+	 * These must be smre_data_double objects.
+	 * @param filename  The relative path to the MAT-file to be written (must not exist).
+	 * @param begin  The first element to write
+	 * @param end  The element to stop writing before.
+	 */
 	template<class It>
 	void write(std::string filename, It begin, It end) {
 		using namespace std;
@@ -106,8 +113,22 @@ public:
 	}
 
 
-	// old interface:
+	/*! Reads all arrays from the file.
+	 * @deprecated use read() instead.
+	 * @param in_file  The relative path to the MAT-file.
+	 * @param[out] no_of_datasets  Number of arrays returned.
+	 * @returns Array pointer.
+	 */
 	smre_data_double* read_file(const char* in_file, int &no_of_datasets);
+
+
+	/*! Writes all arrays to the file.
+	 * @deprecated use write() instead.
+	 * @param out_file  The relative path to the MAT-file.
+	 * @param no_of_datasets  Number of datasets given.
+	 * @param data_read  The arrays.
+	 * @returns Always 0, uses C++-exceptions
+	 */
 	int write_file(const char* out_file, int no_of_datasets, smre_dataformat *data_read);
 };
 

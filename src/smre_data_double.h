@@ -1,9 +1,4 @@
-/*
- * smre_data_double.h
- *
- *  Created on: 09.03.2011
- *      Author: pmarnitz
- */
+/*!  \author pmarnitz */
 #ifndef SMRE_DATA_DOUBLE_H_
 #define SMRE_DATA_DOUBLE_H_
 
