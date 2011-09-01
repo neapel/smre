@@ -15,4 +15,7 @@ endmacro(tiny_test)
 
 # Tests: return 0 for success.
 tiny_test(test_smre_data_double)
-tiny_test(test_mat ../matfiles/test.mat)
+
+if(HAVE_MATIO)
+	tiny_test(test_mat ../matfiles/test.mat)
+endif()

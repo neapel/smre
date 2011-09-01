@@ -1,3 +1,5 @@
+#if HAVE_MATIO
+
 #include "matlab_io.h"
 
 using namespace std;
@@ -19,3 +21,5 @@ int matlab_io::write_file(const char* out_file, int no_of_datasets, smre_datafor
 	write(string(out_file), &data[0], &data[no_of_datasets]);
 	return 0;
 }
+
+#endif

@@ -15,10 +15,15 @@ enable_testing()
 
 
 # MatIO libraries
-find_package(MatIO REQUIRED)
-include_directories(${MatIO_INCLUDE_DIRS})
-set(CMAKE_REQUIRED_LIBRARIES  ${CMAKE_REQUIRED_LIBRARIES} ${MatIO_LIBRARIES})
-
+option(USE_MATIO "Build with Matlab datafile support" ON)
+if(USE_MATIO)
+	find_package(MatIO)
+	if(MatIO_FOUND)
+		include_directories(${MatIO_INCLUDE_DIRS})
+		set(CMAKE_REQUIRED_LIBRARIES  ${CMAKE_REQUIRED_LIBRARIES} ${MatIO_LIBRARIES})
+		set(HAVE_MATIO  ${MatIO_FOUND})
+	endif()
+endif()
 
 # General compiler flags
 add_definitions(-Wall -Wextra -g3)

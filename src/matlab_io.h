@@ -1,6 +1,8 @@
 #ifndef MATLAB_IO_H_
 #define MATLAB_IO_H_
 
+#if HAVE_MATIO
+
 #include <matio.h>
 #include <string>
 #include <vector>
@@ -132,5 +134,6 @@ public:
 	int write_file(const char* out_file, int no_of_datasets, smre_dataformat *data_read);
 };
 
+#endif
 
 #endif /* MATLAB_IO_H_ */
