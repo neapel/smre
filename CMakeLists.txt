@@ -25,8 +25,20 @@ if(USE_MATIO)
 	endif()
 endif()
 
+
+# Boost libraries
+find_package(Boost REQUIRED) # COMPONENTS filesystem test …
+if(Boost_FOUND)
+	include_directories(${Boost_INCLUDE_DIRS})
+	set(CMAKE_REQUIRED_LIBRARIES  ${CMAKE_REQUIRED_LIBRARIES} ${Boost_LIBRARIES})
+endif()
+
+
 # General compiler flags
 add_definitions(-Wall -Wextra -g3)
+
+# C++11
+add_definitions(--std=c++0x)
 
 
 # Profiling
