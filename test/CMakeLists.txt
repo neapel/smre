@@ -10,11 +10,18 @@ macro(tiny_test NAME)
 		COMMAND ${NAME} ${ARGN}
 	)
 	add_dependencies(${NAME} smre)
-endmacro(tiny_test)
+endmacro()
 
 
 # Tests: return 0 for success.
 tiny_test(test_smre_data_double)
+
+tiny_test(test_multi_array_matrix)
+tiny_test(test_multi_array_vector)
+tiny_test(test_multi_array_operators)
+tiny_test(test_multi_array_print)
+tiny_test(test_multi_array_fft)
+
 
 if(HAVE_MATIO)
 	tiny_test(test_mat ../matfiles/test.mat)

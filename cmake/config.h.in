@@ -3,6 +3,6 @@
 
 #define VERSION "${VERSION}"
 
-#cmakedefine HAVE_MATIO
+#cmakedefine HAVE_MATIO 1
 
 #endif

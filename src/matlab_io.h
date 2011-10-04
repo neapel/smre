@@ -1,12 +1,12 @@
 #ifndef MATLAB_IO_H_
 #define MATLAB_IO_H_
 
-#if HAVE_MATIO
+#include "config.h"
+#ifdef HAVE_MATIO
 
 #include <matio.h>
 #include <string>
 #include <vector>
-#include "config.h"
 #include "../abstract/smre_io.h"
 #include "smre_data_double.h"
 

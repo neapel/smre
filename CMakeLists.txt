@@ -8,6 +8,10 @@ include_directories(
 	"src"
 )
 
+macro(require_libraries LIBS)
+	set(CMAKE_REQUIRED_LIBRARIES  ${CMAKE_REQUIRED_LIBRARIES} ${LIBS})
+endmacro()
+
 
 # Tests
 include(CTest)
@@ -20,9 +24,17 @@ if(USE_MATIO)
 	find_package(MatIO)
 	if(MatIO_FOUND)
 		include_directories(${MatIO_INCLUDE_DIRS})
-		set(CMAKE_REQUIRED_LIBRARIES  ${CMAKE_REQUIRED_LIBRARIES} ${MatIO_LIBRARIES})
+		require_libraries(${MatIO_LIBRARIES})
 		set(HAVE_MATIO  ${MatIO_FOUND})
 	endif()
+endif()
+
+
+# FFTw
+find_package(FFTw REQUIRED)
+if(FFTw_FOUND)
+	include_directories(${FFTw_INCLUDE_DIRS})
+	require_libraries(${FFTw_LIBRARIES})
 endif()
 
 
@@ -30,7 +42,9 @@ endif()
 find_package(Boost REQUIRED) # COMPONENTS filesystem test …
 if(Boost_FOUND)
 	include_directories(${Boost_INCLUDE_DIRS})
-	set(CMAKE_REQUIRED_LIBRARIES  ${CMAKE_REQUIRED_LIBRARIES} ${Boost_LIBRARIES})
+	if(${Boost_LIBRARIES})
+		require_libraries(${Boost_LIBRARIES})
+	endif()
 endif()
 
 
@@ -46,6 +60,7 @@ option(USE_COVERAGE "Build with gcov and profiling support" ON)
 if(USE_COVERAGE)
 	set(CMAKE_CXX_FLAGS  ${CMAKE_CXX_FLAGS}  "--coverage")
 	set(CMAKE_LINKER_FLAGS  ${CMAKE_LINKER_FLAGS}  "--coverage")
+	message(STATUS "Building with coverage and profiling support")
 endif()
 
 

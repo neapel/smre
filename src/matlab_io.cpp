@@ -1,6 +1,5 @@
-#if HAVE_MATIO
-
 #include "matlab_io.h"
+#if HAVE_MATIO
 
 using namespace std;
 
