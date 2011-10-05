@@ -4,7 +4,6 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
 
 include_directories(
 	"abstract"
-	"include"
 	"src"
 )
 
@@ -76,11 +75,12 @@ endif()
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
 	set(DOXYGEN_CONF  ${CMAKE_CURRENT_BINARY_DIR}/doxygen.conf)
-	set(DOXYGEN_SOURCE_DIR  src abstract)
-	set(DOXYGEN_OUTPUT_DIR  "doc")
-	set(DOXYGEN_INCLUDE_PATH  "include")
+	set(DOXYGEN_SOURCE_DIR  "${CMAKE_SOURCE_DIR}/src")
+	set(DOXYGEN_OUTPUT_DIR  "${CMAKE_CURRENT_BINARY_DIR}/doc")
+	set(DOXYGEN_INCLUDE_PATH  "")
 	STRING(REGEX REPLACE ";" " " DOXYGEN_INPUT_LIST "${DOXYGEN_SOURCE_DIR}")
-	configure_file(cmake/doxygen.conf.in ${DOXYGEN_CONF})
+	set(DOXYGEN_STRIP_FROM_PATH  "${DOXYGEN_INPUT_LIST}")
+	configure_file(${CMAKE_SOURCE_DIR}/cmake/doxygen.conf.in ${DOXYGEN_CONF})
 
 	add_custom_target(doc
 		${DOXYGEN_EXECUTABLE} ${DOXYGEN_CONF}
@@ -91,10 +91,16 @@ endif()
 
 
 # config.h
-configure_file(cmake/config.h.in src/config.h)
+configure_file(${CMAKE_SOURCE_DIR}/cmake/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
 
+
+# Primary
 add_subdirectory(src)
+
+
+# Tests
 if(BUILD_TESTING)
 	add_subdirectory(test)
 endif()
