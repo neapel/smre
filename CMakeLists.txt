@@ -46,6 +46,27 @@ if(Boost_FOUND)
 	require_libraries(${Boost_LIBRARIES})
 endif()
 
+# Image libraries for use with Boost::GIL
+find_package(JPEG)
+if(JPEG_FOUND)
+	include_directories(${JPEG_INCLUDE_DIRS})
+	require_libraries(${JPEG_LIBRARIES})
+	set(HAVE_JPEG ${JPEG_FOUND})
+endif()
+find_package(PNG)
+if(PNG_FOUND)
+	include_directories(${PNG_INCLUDE_DIRS})
+	require_libraries(${PNG_LIBRARIES})
+	set(HAVE_PNG ${PNG_FOUND})
+	add_definitions(${PNG_DEFINITIONS})
+endif()
+find_package(TIFF)
+if(TIFF_FOUND)
+	include_directories(${TIFF_INCLUDE_DIRS})
+	require_libraries(${TIFF_LIBRARIES})
+	set(HAVE_TIFF ${TIFF_FOUND})
+endif()
+
 
 # General compiler flags
 add_definitions(-Wall -Wextra -g3)

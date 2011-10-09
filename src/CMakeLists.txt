@@ -4,12 +4,12 @@ set(BASE_SRC
 	io.cpp
 		matlab_io.cpp
 		plain_io.cpp
+		gil_io.cpp
 )
 
 add_library(smre SHARED ${BASE_SRC})
-target_link_libraries(smre ${CMAKE_REQUIRED_LIBRARIES})
-
-set(CMAKE_REQUIRED_LIBRARIES smre ${CMAKE_REQUIRED_LIBRARIES})
+#target_link_libraries(smre ${CMAKE_REQUIRED_LIBRARIES})
+require_libraries(smre)
 
 
 # Executables using that library

@@ -3,6 +3,16 @@
 
 #define VERSION "${VERSION}"
 
+// libmatio
 #cmakedefine HAVE_MATIO 1
+
+// format libs for GIL
+#cmakedefine HAVE_JPEG 1
+#cmakedefine HAVE_PNG 1
+#cmakedefine HAVE_TIFF 1
+
+#if defined(HAVE_JPEG) | defined(HAVE_PNG) | defined(HAVE_TIFF)
+# define HAVE_GIL 1
+#endif
 
 #endif
