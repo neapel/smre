@@ -25,7 +25,7 @@ static const size_t N = data_t::dimensionality;
 
 // Reader
 gil_reader::gil_reader(string filename) {
-	typedef mpl::vector<gray8_image_t, gray16_image_t, rgb8_image_t, rgb16_image_t> my_img_types;
+	typedef mpl::vector<gray8_image_t> my_img_types;
 	any_image<my_img_types> runtime_image;
 	jpeg_read_image(filename, runtime_image);
 }

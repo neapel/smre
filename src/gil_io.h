@@ -9,7 +9,7 @@
 
 
 class gil_reader : public file_reader {
-	boost::multi_array<double, 3> data;
+	boost::multi_array<double, 2> data;
 public:
 	gil_reader(std::string filename);
 	~gil_reader() { close(); }
@@ -19,7 +19,7 @@ public:
 };
 
 class gil_writer : public file_writer {
-	boost::multi_array<double, 3> data;
+	boost::multi_array<double, 2> data;
 public:
 	gil_writer(std::string filename);
 	~gil_writer() { close(); }
