@@ -1,6 +1,10 @@
 
 # Stick common SMRE stuff into a library, used by tests etc.
-set(BASE_SRC  matlab_io.cpp smre_data_double.cpp)
+set(BASE_SRC
+	io.cpp
+		matlab_io.cpp
+		plain_io.cpp
+)
 
 add_library(smre SHARED ${BASE_SRC})
 target_link_libraries(smre ${CMAKE_REQUIRED_LIBRARIES})

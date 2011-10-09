@@ -11,21 +11,20 @@ using namespace mimas;
 int main(int, char**) {
 	multi_array<double, 2> A(extents[4][3]);
 	iota(A, 1);
-
-	cout << A << endl;
+	double v = 8;
+	assert(A[2][1] == v);
 
 	A *= 4.0;
-	cout << A << endl;
+	v *= 4.0; assert(A[2][1] == v);
 
 	A /= 3.0;
-	cout << A << endl;
+	v /= 3.0; assert(A[2][1] == v);
 
 	A += 4.0;
-	cout << A << endl;
+	v += 4.0; assert(A[2][1] == v);
 
 	A -= 1.0;
-	cout << A << endl;
-
+	v -= 1.0; assert(A[2][1] == v);
 
 	return 0;
 }

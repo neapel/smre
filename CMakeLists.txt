@@ -38,12 +38,12 @@ endif()
 
 
 # Boost libraries
-find_package(Boost REQUIRED) # COMPONENTS filesystem test …
+find_package(Boost
+	COMPONENTS program_options
+	REQUIRED)
 if(Boost_FOUND)
 	include_directories(${Boost_INCLUDE_DIRS})
-	if(${Boost_LIBRARIES})
-		require_libraries(${Boost_LIBRARIES})
-	endif()
+	require_libraries(${Boost_LIBRARIES})
 endif()
 
 

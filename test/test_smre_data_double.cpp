@@ -87,5 +87,5 @@ int run(int no_of_runs) {
 
 
 int main(int, char **) {
-	return run(100);
+	return run(1);
 }

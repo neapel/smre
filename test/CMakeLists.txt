@@ -14,9 +14,9 @@ endmacro()
 
 set(MAT_DIR "${CMAKE_SOURCE_DIR}/matfiles")
 
-
 # Tests: return 0 for success.
-tiny_test(test_smre_data_double)
+
+
 
 # multi_array <-> uBLAS adaptors
 tiny_test(test_multi_array_matrix)
@@ -30,6 +30,8 @@ tiny_test(test_multi_array_print)
 tiny_test(test_multi_array_fft)
 
 
+# io
 if(HAVE_MATIO)
-	tiny_test(test_mat "${MAT_DIR}/test.mat")
+	tiny_test(test_matlab_io "${MAT_DIR}/test.mat")
 endif()
+tiny_test(test_plain_io)

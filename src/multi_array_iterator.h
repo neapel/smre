@@ -41,7 +41,7 @@ public:
 	element_iterator(A &a) : base(a), i(0) {}
 	element_iterator(const self_type &o) : base(o.base), i(o.i) {}
 
-	typename A::element &dereference() {
+	typename A::element &dereference() const {
 		return base(internal::index_to_array(base, i));
 	}
 
@@ -57,9 +57,12 @@ public:
 	void decrement() { i--; }
 	void advance(ptrdiff_t n) { i += n; }
 
+	// Container
 	self_type begin() const { return self_type(base, 0); }
 	self_type end() const { return self_type(base, base.num_elements()); }
 };
+
+
 
 
 
@@ -96,12 +99,18 @@ public:
 	void decrement() { i--; }
 	void advance(ptrdiff_t n) { i += n; }
 
+	// Container
 	self_type begin() const { return self_type(base, 0); }
 	self_type end() const { return self_type(base, base.num_elements()); }
 };
 
 
 
+template<class A>
+element_iterator<A> all_elements(A &a) { return {a}; }
+
+template<class A>
+const_element_iterator<A> all_elements(const A &a) { return {a}; }
 
 
 #endif

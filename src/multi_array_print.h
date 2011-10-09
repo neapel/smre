@@ -16,12 +16,12 @@ template<class A, size_t N>
 struct print_multi_array {
 	std::ostream &operator()(std::ostream &o, const A &a) {
 		print_multi_array<decltype(a[0]), N - 1> next;
-		for(typename A::size_type i = 0 ; i != a.size() ; i++) {
+		for(int i = 0 ; i != static_cast<int>(a.size()) ; i++) {
 			auto i_ = i + a.index_bases()[0];
 			next(o, a[i_]);
 			o << (a.num_dimensions() > 3 ? ", " : " ");
 			o << "i_" << a.num_dimensions() << " = " << i_;
-			if(i != a.size() - 1) o << '\n';
+			if(i != static_cast<int>(a.size()) - 1) o << '\n';
 		}
 		return o;
 	}

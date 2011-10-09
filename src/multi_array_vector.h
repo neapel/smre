@@ -9,26 +9,27 @@ namespace boost { namespace numeric { namespace ublas {
 
 
 // vector storage
-template<class T>
-class multi_array_vector_storage : public storage_array< multi_array_vector_storage<T>> {
-	typedef multi_array<T, 1> multi;
-	typedef multi_array_vector_storage<T> self_type;
+template<class V>
+class multi_array_vector_storage
+ : public storage_array<multi_array_vector_storage<V>> {
+	static_assert(V::dimensionality == 1, "Must be a rank 1 multi_array(view)");
 
-	multi &base;
+	typedef multi_array_vector_storage<V> self_type;
+	V &base;
 
 public:
 	// Assignable
 	multi_array_vector_storage(const self_type &o) : base(o.base) {}
 
 	// Container
-	typedef T value_type;
-	typedef typename multi::iterator iterator;
-	typedef typename multi::const_iterator const_iterator;
-	typedef typename multi::reference reference;
-	typedef typename multi::const_reference const_reference;
+	typedef typename V::element value_type;
+	typedef typename V::iterator iterator;
+	typedef typename V::const_iterator const_iterator;
+	typedef typename V::reference reference;
+	typedef typename V::const_reference const_reference;
 	typedef value_type *pointer;
-	typedef typename multi::difference_type difference_type;
-	typedef typename multi::size_type size_type;
+	typedef typename V::difference_type difference_type;
+	typedef typename V::size_type size_type;
 
 	iterator begin() { return base.begin(); }
 	const_iterator begin() const { return base.begin(); }
@@ -48,8 +49,8 @@ public:
 	bool operator>=(const self_type &other) const { return base >= other; }
 
 	// Reversible Container
-	typedef typename multi::reverse_iterator reverse_iterator;
-	typedef typename multi::const_reverse_iterator const_reverse_iterator;
+	typedef typename V::reverse_iterator reverse_iterator;
+	typedef typename V::const_reverse_iterator const_reverse_iterator;
 
 	reverse_iterator rbegin() { return base.rbegin(); }
 	const_reverse_iterator rbegin() const { return base.rbegin(); }
@@ -82,21 +83,28 @@ public:
 	}
 
 	// Adapt multi_array
-	multi_array_vector_storage(multi &orig) : base(orig) {}
+	multi_array_vector_storage(V &orig) : base(orig) {}
 };
 
 
 
-
-
-
-template<class T>
-vector<T, multi_array_vector_storage<T>>
-make_vector(multi_array<T, 1> &a) {
-	typedef multi_array_vector_storage<T> s;
-	typedef vector<T, s> v;
-	return v( a.size(), s(a) );
+template<class T, template<class, size_t> class A>
+multi_array_vector_storage<A<T, 1>> make_storage(A<T, 1> &a) {
+	return {a};
 }
+
+template<class T, class Alloc, template<class, size_t, class> class A>
+multi_array_vector_storage<A<T, 1, Alloc>> make_storage(A<T, 1, Alloc> &a) {
+	return {a};
+}
+
+
+template<class A>
+vector<typename A::value_type, multi_array_vector_storage<A>> make_vector(A &a) {
+	auto s = make_storage(a);
+	return {s.size(), s};
+}
+
 
 
 

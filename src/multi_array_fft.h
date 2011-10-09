@@ -10,18 +10,15 @@ extern "C" {
 #include <boost/multi_array.hpp>
 #include <array>
 
-
-template<class A>
+#include "../test/multi_array_compare.h"
+template<class In, class Out>
 class fft {
-public:
-	typedef A array_t;
-
-private:
-	static const int N = array_t::dimensionality;
+	static_assert(In::dimensionality == Out::dimensionality, "Arrays must have same rank.");
+	static const size_t N = In::dimensionality;
 	fftw_plan plan;
 
-
-	void calculate_stride(const array_t &a, std::array<int, N> &nembed, int &stride) {
+	template<class A>
+	void calculate_stride(const A &a, std::array<int, N> &nembed, int &stride) {
 		// FFTw calculates stride[i] = stride * nembed[i + 1] * ... * nembed[N - 1]
 		// see: fftw-source:/api/mktensor-rowmajor.c
 
@@ -37,27 +34,36 @@ private:
 		nembed[0] = 0;
 	}
 
-	bool is_continuous(const array_t &a) {
-		typename array_t::size_type size = a.shape()[0];
-		for(int i = 0 ; i < N ; i++)
+	template<class A>
+	bool is_continuous(const A &a) {
+		typename A::size_type size = a.shape()[0];
+		for(size_t i = 0 ; i < N ; i++)
 			size *= a.strides()[i];
 		return size == a.num_elements();
 	}
 
+	void make_plan(In &in, Out &out, std::array<fftw_r2r_kind, N> kinds, unsigned flags) {
+#if 0
+		std::array<int, N> in_base, out_base;
+		std::copy(in.index_bases(), in.index_bases() + N, in_base.begin());
+		std::copy(out.index_bases(), out.index_bases() + N, out_base.begin());
 
-	void make_plan(array_t &in, array_t &out, std::array<fftw_r2r_kind, N> kinds, unsigned flags) {
-		std::array<typename array_t::index, N> in_base, out_base;
-		std::copy(&in.index_bases()[0], &in.index_bases()[N], in_base.begin());
-		std::copy(&out.index_bases()[0], &out.index_bases()[N], out_base.begin());
-
+		// doesn't work with views?!
 		double *in_data = &in(in_base);
 		double *out_data = &out(out_base);
+#else
+		for(size_t i = 0 ; i < N ; i++)
+			if(in.index_bases()[i] != 0 || out.index_bases()[i] != 0)
+				throw std::invalid_argument("Nonzero bases are not supported");
+		double *in_data = in.origin();
+		double *out_data = out.origin();
+#endif
 
 		std::array<int, N> shape;
-		for(int i = 0 ; i < N ; i++)
+		for(size_t i = 0 ; i < N ; i++)
 			shape[i] = static_cast<int>(in.shape()[i]);
 
-#if 0
+#if 1
 		if( !is_continuous(in) || !is_continuous(out) )
 			throw std::invalid_argument("Views are not supported.");
 
@@ -95,13 +101,13 @@ private:
 	}
 
 public:
-	fft(array_t &in, array_t &out, fftw_r2r_kind kind, unsigned flags = 0) {
+	fft(In &in, Out &out, fftw_r2r_kind kind, unsigned flags = 0) {
 		std::array<fftw_r2r_kind, N> kinds;
 		std::fill( kinds.begin(), kinds.end(), kind );
 		make_plan(in, out, kinds, flags);
 	}
 
-	fft(array_t &in, array_t &out, std::array<fftw_r2r_kind, N> kinds, unsigned flags = 0) {
+	fft(In &in, Out &out, std::array<fftw_r2r_kind, N> kinds, unsigned flags = 0) {
 		make_plan(in, out, kinds, flags);
 	}
 
@@ -126,14 +132,14 @@ public:
 
 
 
-template<class A>
-fft<A> plan_dct(A &in, A &out, unsigned flags = 0) {
-	return fft<A>(in, out, FFTW_REDFT10, flags);
+template<class In, class Out>
+fft<In, Out> plan_dct(In &in, Out &out, unsigned flags = 0) {
+	return {in, out, FFTW_REDFT10, flags};
 }
 
-template<class A>
-fft<A> plan_idct(A &in, A &out, unsigned flags = 0) {
-	return fft<A>(in, out, FFTW_REDFT01, flags);
+template<class In, class Out>
+fft<In, Out> plan_idct(In &in, Out &out, unsigned flags = 0) {
+	return {in, out, FFTW_REDFT01, flags};
 }
 
 
