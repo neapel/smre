@@ -110,6 +110,9 @@ template<class A>
 element_iterator<A> all_elements(A &a) { return {a}; }
 
 template<class A>
+element_iterator<A> all_elements_noconst(A &a) { return {a}; }
+
+template<class A>
 const_element_iterator<A> all_elements(const A &a) { return {a}; }
 
 
