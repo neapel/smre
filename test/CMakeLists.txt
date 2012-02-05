@@ -29,6 +29,9 @@ tiny_test(test_multi_array_print)
 # multi_array <-> FFTw adaptors
 tiny_test(test_multi_array_fft)
 
+# operator split
+tiny_test(test_tuple_cut)
+tiny_test(test_operator_split)
 
 # io
 if(HAVE_MATIO)

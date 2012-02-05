@@ -12,6 +12,7 @@ macro(require_libraries LIBS)
 endmacro()
 
 
+
 # Tests
 include(CTest)
 enable_testing()
@@ -47,18 +48,53 @@ if(Boost_FOUND)
 endif()
 
 
-# General compiler flags
-add_definitions(-Wall -Wextra -g3)
+# Compiler specifics
+include(CheckCXXCompilerFlag)
+include(CheckCXXSourceCompiles)
 
-# C++11
-add_definitions(--std=c++0x)
+macro(REQUIRE_SOURCE_COMPILES SOURCE VAR)
+	check_cxx_source_compiles("${SOURCE}\n int main() {return 0;}" ${VAR})
+	if(${VAR})
+		message(STATUS "Compiler supports ${VAR}.")
+	else()
+		message(FATAL_ERROR "Compiler support test ${VAR} failed.")
+	endif()
+endmacro()
+
+# General compiler flags
+if(CMAKE_COMPILER_IS_GNUCXX)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra --std=c++0x")
+	add_definitions(-Wall -Wextra --std=c++0x)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3")
+	add_definitions(-g3)
+endif()
+
+require_source_compiles("
+	void test() {
+		auto k = 1 + 1;
+		k = 0;
+	}
+" CXX_HAS_AUTO)
+require_source_compiles("
+	void test() {
+		decltype(1 + 1) k = 1;
+		k = 0;
+	}
+" CXX_HAS_DECLTYPE)
+require_source_compiles("
+	#include <vector>
+	void test() {
+		std::vector<int> i = {1, 2, 3};
+		for(int &j : i) j = 0;
+	}
+" CXX_HAS_FOREACH)
 
 
 # Profiling
 option(USE_COVERAGE "Build with gcov and profiling support" ON)
 if(USE_COVERAGE)
-	set(CMAKE_CXX_FLAGS  ${CMAKE_CXX_FLAGS}  "--coverage")
-	set(CMAKE_LINKER_FLAGS  ${CMAKE_LINKER_FLAGS}  "--coverage")
+	set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} --coverage")
+	set(CMAKE_LINKER_FLAGS  "${CMAKE_LINKER_FLAGS} --coverage")
 	message(STATUS "Building with coverage and profiling support")
 endif()
 
