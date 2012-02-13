@@ -30,6 +30,18 @@ if(USE_MATIO)
 endif()
 
 
+# OpenCL libraries
+option(USE_OPENCL "Build with OpenCL kernels" ON)
+if(USE_OPENCL)
+	find_package(OpenCL)
+	if(OpenCL_FOUND)
+		include_directories(${OpenCL_INCLUDE_DIRS})
+		require_libraries(${OpenCL_LIBRARIES})
+		set(HAVE_OPENCL  ${OpenCL_FOUND})
+	endif()
+endif()
+
+
 # FFTw
 find_package(FFTw REQUIRED)
 if(FFTw_FOUND)

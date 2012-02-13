@@ -12,6 +12,10 @@ macro(tiny_test NAME)
 	add_dependencies(${NAME} smre)
 endmacro()
 
+macro(extra_file NAME)
+	configure_file(${NAME} ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+endmacro()
+
 set(MAT_DIR "${CMAKE_SOURCE_DIR}/matfiles")
 
 # Tests: return 0 for success.
@@ -38,3 +42,9 @@ if(HAVE_MATIO)
 	tiny_test(test_matlab_io "${MAT_DIR}/test.mat")
 endif()
 tiny_test(test_plain_io)
+
+# opencl
+if(HAVE_OPENCL)
+	extra_file(test_opencl_add.cl)
+	tiny_test(test_opencl)
+endif()
