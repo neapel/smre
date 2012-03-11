@@ -14,13 +14,13 @@ namespace mimas {
     @{ */
 ///
 template <
-  template< typename, size_t > class MultiArray1,
-  template< typename, size_t > class MultiArray2,
-  typename T, size_t NumDims
+  template< typename, size_t, typename > class MultiArray1,
+  template< typename, size_t, typename > class MultiArray2,
+  typename T, size_t NumDims, typename Allocator1, typename Allocator2
 >
-boost::multi_array< T, NumDims > __MIMASEXTERNALARRAYFUNC
-( const MultiArray1< T, NumDims > &a,
-  const MultiArray2< T, NumDims > &b )
+boost::multi_array< T, NumDims, Allocator1 > __MIMASEXTERNALARRAYFUNC
+( const MultiArray1< T, NumDims, Allocator1 > &a,
+  const MultiArray2< T, NumDims, Allocator2 > &b )
 {
   return multi_func< T >( a, b, __MIMASFUNCTIONOBJECT< T >() );
 };
@@ -93,13 +93,13 @@ boost::detail::multi_array::sub_array< T, NumDims > __MIMASINTERNALARRAYFUNC
 
 ///
 template <
-  template< typename, size_t > class MultiArray1,
-  template< typename, size_t > class MultiArray2,
-  typename T, size_t NumDims
+  template< typename, size_t, typename > class MultiArray1,
+  template< typename, size_t, typename > class MultiArray2,
+  typename T, size_t NumDims, typename Allocator1, typename Allocator2
 >
-MultiArray1< T, NumDims > &__MIMASINTERNALARRAYFUNC
-( MultiArray1< T, NumDims > &a,
-  const MultiArray2< T, NumDims > &b )
+MultiArray1< T, NumDims, Allocator1 > &__MIMASINTERNALARRAYFUNC
+( MultiArray1< T, NumDims, Allocator1 > &a,
+  const MultiArray2< T, NumDims, Allocator2 > &b )
 {
   return multi_apply( a, a, b,
                       _multi_help2< T, T, T, __MIMASFUNCTIONOBJECT< T > >

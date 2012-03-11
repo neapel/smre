@@ -34,14 +34,6 @@ class fft {
 		nembed[0] = 0;
 	}
 
-	template<class A>
-	bool is_continuous(const A &a) {
-		typename A::size_type size = a.shape()[0];
-		for(size_t i = 0 ; i < N ; i++)
-			size *= a.strides()[i];
-		return size == a.num_elements();
-	}
-
 	void make_plan(In &in, Out &out, std::array<fftw_r2r_kind, N> kinds, unsigned flags) {
 #if 0
 		std::array<int, N> in_base, out_base;

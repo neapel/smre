@@ -3,10 +3,20 @@
 
 #include "mimas/multi_array_op.h"
 
-// Fill an array with increasing values
+/** Fills an array with increasing values */
 template<class I, class A>
 void iota(A &a, I x = I()) {
 	mimas::multi_apply(a, [&x](typename A::element &e){ e = x++; });
+}
+
+
+/** Returns true if there are no unused bytes in the array's memory */
+template<class A>
+bool is_continuous(const A &a) {
+	typename A::size_type size = a.shape()[0];
+	for(size_t i = 0 ; i < a.num_dimensions() ; i++)
+		size *= a.strides()[i];
+	return size == a.num_elements();
 }
 
 
