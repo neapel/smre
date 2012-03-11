@@ -45,6 +45,6 @@ tiny_test(test_plain_io)
 
 # opencl
 if(HAVE_OPENCL)
-	extra_file(test_opencl_add.cl)
+	extra_file(test_opencl.cl)
 	tiny_test(test_opencl)
 endif()

@@ -1,28 +1,34 @@
 #include "opencl_helpers.h"
+#include <sstream>
 
 using namespace cl;
 using namespace std;
 
 
 
-string read_file(string name) {
-	using namespace std;
-	fstream f(name.c_str(), fstream::in | fstream::binary);
-	return string(
-		istreambuf_iterator<char>(f),
-		istreambuf_iterator<char>()
-	);
+
+cl_uint make_wait_list(vector<event> events, cl_event *&out) {
+	if(events.size() == 0) {
+		out = nullptr;
+		return 0;
+	} else {
+		out = new cl_event[events.size()];
+		size_t i = 0;
+		for(event e : events)
+			out[i++] = e.native;
+		return events.size();
+	}
 }
 
 
 
 vector<device> cl::platform::all_devices(cl_device_type type) const {
 	cl_uint size;
-	cl_int status = clGetDeviceIDs(native_platform, type, 0, NULL, &size);
+	cl_int status = clGetDeviceIDs(native, type, 0, NULL, &size);
 	if(status != CL_SUCCESS || size == 0)
 		throw error(status, "Couldn't enumerate devices");
 	cl_device_id devices[size];
-	status = clGetDeviceIDs(native_platform, type, size, devices, &size);
+	status = clGetDeviceIDs(native, type, size, devices, &size);
 	if(status != CL_SUCCESS || size == 0)
 		throw error(status, "Couldn't enumerate devices");
 	vector<device> out;
@@ -31,66 +37,6 @@ vector<device> cl::platform::all_devices(cl_device_type type) const {
 	return out;
 }
 
-
-
-ostream &cl::operator<<(ostream &o, const device &d) {
-	o << "  Device (" << d.info<string>(CL_DEVICE_NAME) << ")\n";
-	o << "    Type: ";
-	switch(d.info<cl_device_type>(CL_DEVICE_TYPE)) {
-		case CL_DEVICE_TYPE_CPU: o << "CPU"; break;
-		case CL_DEVICE_TYPE_GPU: o << "GPU"; break;
-		case CL_DEVICE_TYPE_ACCELERATOR: o << "Accelerator"; break;
-		case CL_DEVICE_TYPE_DEFAULT: o << "Default"; break;
-		default: o << "Other"; break;
-	}
-	o << '\n';
-	o
-		<< "    Available: " << d.info<cl_bool>(CL_DEVICE_AVAILABLE) << '\n'
-		<< "    Compiler available: " << d.info<cl_bool>(CL_DEVICE_COMPILER_AVAILABLE) << '\n'
-//		<< "    Linker available: " << d.info<cl_bool>(CL_DEVICE_LINKER_AVAILABLE) << '\n'
-		<< "    Vendor: " << d.info<string>(CL_DEVICE_VENDOR) << '\n'
-		<< "    Version: " << d.info<string>(CL_DEVICE_VERSION) << '\n'
-		<< "    Profile: " << d.info<string>(CL_DEVICE_PROFILE) << '\n'
-		<< "    Language Version: " << d.info<string>(CL_DEVICE_OPENCL_C_VERSION) << '\n'
-		<< "    Driver Version: " << d.info<string>(CL_DRIVER_VERSION) << '\n'
-		<< "    Memory size: " << d.info<cl_ulong>(CL_DEVICE_GLOBAL_MEM_SIZE) / (1024 * 1024) << 'M' << '\n'
-		<< "    Compute units: " << d.info<cl_uint>(CL_DEVICE_MAX_COMPUTE_UNITS) << '\n'
-		<< "    Bits: " << d.info<cl_uint>(CL_DEVICE_ADDRESS_BITS) << '\n'
-		<< "    Cache size: " << d.info<cl_ulong>(CL_DEVICE_GLOBAL_MEM_CACHE_SIZE) / 1024 << 'k' << '\n'
-		<< "    Cacheline size: " << d.info<cl_uint>(CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE) << '\n'
-//		<< "    Builtin Kernels: " << d.info<string>(CL_DEVICE_BUILT_IN_KERNELS) << '\n'
-		<< "    Extensions: " << d.info<string>(CL_DEVICE_EXTENSIONS) << '\n'
-	;
-	return o;
-}
-
-
-
-string cl::platform::info(cl_platform_info name) const {
-	size_t size;
-	cl_int status = clGetPlatformInfo(native_platform, name, 0, NULL, &size);
-	if(status != CL_SUCCESS)
-		throw error(status, "Couldn't get platform info");
-	char buf[size];
-	status = clGetPlatformInfo(native_platform, name, size, buf, &size);
-	if(status != CL_SUCCESS)
-		throw error(status, "Couldn't get platform info");
-	return string(buf, size);
-}
-
-
-ostream &cl::operator<<(ostream &o, const platform &p) {
-	o
-		<< "Platform (" << p.info(CL_PLATFORM_NAME) << ")\n"
-		<< "  Vendor: " << p.info(CL_PLATFORM_VENDOR) << '\n'
-		<< "  Version: " << p.info(CL_PLATFORM_VERSION) << '\n'
-		<< "  Profile: " << p.info(CL_PLATFORM_PROFILE) << '\n'
-		<< "  Extensions: " << p.info(CL_PLATFORM_EXTENSIONS) << '\n'
-	;
-	for(auto d : p.all_devices())
-		o << d << '\n';
-	return o;
-}
 
 
 
@@ -111,21 +57,116 @@ vector<platform> cl::all_platforms() {
 
 
 
+event::event(const context *c, cl_event e) : parent_context(c), native(e) {
+	if(false) {
+		clSetEventCallback(e, CL_SUBMITTED,
+			[](cl_event e, cl_int, void *) { clog << "Event " << e << " SUBMITTED" << endl; },
+			nullptr);
+		clSetEventCallback(e, CL_RUNNING,
+			[](cl_event e, cl_int, void *) { clog << "Event " << e << " RUNNING" << endl; },
+			nullptr);
+		clSetEventCallback(e, CL_COMPLETE,
+			[](cl_event e, cl_int, void *) { clog << "Event " << e << " COMPLETE" << endl; },
+			nullptr);
+	}
+}
 
-void cl::context::construct(platform p) {
+
+void construct(buffer &buf, const context *ctx) {
+	if(buf.parent_context != nullptr && buf.parent_context != ctx)
+		throw logic_error("Buffer already registered with another context");
+	buf.parent_context = ctx;
+	if(buf.native != 0)
+		return;
+	cl_mem_flags f = 0;
+	if((buf.flags & kernel_read) && (buf.flags & kernel_write)) f |= CL_MEM_READ_WRITE;
+	else if(buf.flags & kernel_read) f |= CL_MEM_READ_ONLY;
+	else if(buf.flags & kernel_write) f |= CL_MEM_WRITE_ONLY;
+	else throw invalid_argument("Buffer must be accessible from kernel");
+	if((buf.flags & host_read) || (buf.flags & host_write)) {
+		f |= CL_MEM_ALLOC_HOST_PTR;
+#if 0 // OpenCL1.2
+		if(!(buf.flags & host_read)) f |= CL_MEM_COPY_HOST_WRITE_ONLY;
+		else if(!(buf.flag & host_write)) f |= CL_MEM_COPY_HOST_READ_ONLY;
+#endif
+	}
+#if 0 // OpenCL1.2
+	else f |= CL_MEM_COPY_HOST_NO_ACCESS;
+#endif
+	cl_int status;
+	buf.native = clCreateBuffer(ctx->native, f, buf.size, NULL, &status);
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't create CL buffer");
+}
+
+
+event after::operator()(buffer_write &&bw) {
+	if(bw.buf.size != 0 && bw.buf.size != bw.size)
+		throw std::range_error("Data size different from buffer size.");
+	bw.buf.size = bw.size;
+	construct(bw.buf, parent_context);
+	cl_event *wait_list;
+	cl_uint wait_size = make_wait_list(events, wait_list);
+	cl_event e;
+	cl_uint status = clEnqueueWriteBuffer(
+		parent_context->queue,
+		bw.buf.native,
+		CL_FALSE, // blocking
+		0, // offset
+		bw.size,
+		bw.data,
+		wait_size,
+		wait_list,
+		&e
+	);
+	delete [] wait_list;
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't queue writing to CL buffer");
+	return event(parent_context, e);
+}
+
+
+
+event after::operator()(buffer_read &&bw) {
+	construct(bw.buf, parent_context);
+	if(bw.buf.size != bw.size)
+		throw std::range_error("Sizes different.");
+	cl_event *wait_list;
+	cl_uint wait_size = make_wait_list(events, wait_list);
+	cl_event e;
+	cl_uint status = clEnqueueReadBuffer(
+		parent_context->queue,
+		bw.buf.native,
+		CL_FALSE, // blocking
+		0, // offset
+		bw.size,
+		bw.data,
+		wait_size,
+		wait_list,
+		&e
+	);
+	delete [] wait_list;
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't queue reading from CL buffer");
+	return event(parent_context, e);
+}
+
+
+
+void construct(context &c, platform p) {
 	cl_int status;
 	// create the context
 	cl_context_properties context_props[] = {
-		CL_CONTEXT_PLATFORM, reinterpret_cast<cl_context_properties>(p.native_platform),
+		CL_CONTEXT_PLATFORM, reinterpret_cast<cl_context_properties>(p.native),
 		0
 	};
-	ctx = clCreateContextFromType(
+	c.native = clCreateContextFromType(
 		context_props,
 		CL_DEVICE_TYPE_CPU,
 		[](const char *error, const void *, size_t, void *) {
 			cerr << "OpenCL Error: " << error << endl;
 		},
-		this,
+		nullptr,
 		&status
 	);
 	if(status != CL_SUCCESS)
@@ -133,85 +174,109 @@ void cl::context::construct(platform p) {
 
 	// get the devices
 	size_t num_devices;
-	status = clGetContextInfo(ctx, CL_CONTEXT_DEVICES, 0, NULL, &num_devices);
+	status = clGetContextInfo(c.native, CL_CONTEXT_DEVICES, 0, NULL, &num_devices);
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't query CL context");
 	cl_device_id devices[num_devices];
-	status = clGetContextInfo(ctx, CL_CONTEXT_DEVICES, num_devices, devices, &num_devices);
+	status = clGetContextInfo(c.native, CL_CONTEXT_DEVICES, num_devices, devices, &num_devices);
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't query CL context");
-	device = devices[0];
-	clog << "Using" << ::device(device) << endl;
+	c.device = devices[0];
 
 	// create queue
-	queue = clCreateCommandQueue(ctx, device, 0, &status);
+	c.queue = clCreateCommandQueue(c.native, c.device, 0, &status);
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't create CL queue");
 }
 
 
+context::context() {
+	construct(*this, all_platforms().front());
+}
 
-program cl::context::load_program(string filename) {
-	return program(this, filename);
+
+context::context(platform p) {
+	construct(*this, p);
 }
 
 
 
-void cl::context::wait(vector<event> events) {
+
+string read_file(string name) {
+	using namespace std;
+	fstream f(name.c_str(), fstream::in | fstream::binary);
+	return string(
+		istreambuf_iterator<char>(f),
+		istreambuf_iterator<char>()
+	);
+}
+
+program cl::context::load(string filename) {
+	return program(this, read_file(filename));
+}
+
+program cl::context::compile(string code) {
+	return program(this, code);
+}
+
+
+
+
+
+
+void after::resume() {
 	if(events.size() == 0) return;
-	cl_event list[events.size()];
-	for(size_t i = 0 ; i < events.size() ; i++)
-		list[i] = events[i].native_event;
-	cl_uint status = clWaitForEvents(events.size(), list);
+	cl_event *wait_list;
+	cl_uint wait_size = make_wait_list(events, wait_list);
+	cl_uint status = clWaitForEvents(wait_size, wait_list);
+	delete [] wait_list;
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't wait for events");
 }
 
 
 
-event cl::kernel::run(vector<size_t> size, vector<size_t> offset , vector<size_t> group_size, vector<event> wait) {
-	size_t *global_work_size = new size_t[size.size()];
-	copy(size.begin(), size.end(), global_work_size);
+
+event after::operator()(const kernel &r) {
+	if(r.global_size.size() == 0)
+		throw invalid_argument("No work size set for kernel");
+	const size_t dims = r.global_size.size();
+	size_t *global_work_size = new size_t[dims];
+	copy(r.global_size.begin(), r.global_size.end(), global_work_size);
 	size_t *global_work_offset = nullptr;
-	if(offset.size() == size.size()) {
-		global_work_offset = new size_t[size.size()];
-		copy(offset.begin(), offset.end(), global_work_offset);
+	if(r.global_offset.size() == dims) {
+		global_work_offset = new size_t[dims];
+		copy(r.global_offset.begin(), r.global_offset.end(), global_work_offset);
 	}
-	size_t *local_work_size = nullptr;
-	if(group_size.size() == size.size()) {
-		local_work_size = new size_t[size.size()];
-		copy(group_size.begin(), group_size.end(), local_work_size);
-	}
-	cl_event wait_list[wait.size()];
-	for(size_t i = 0 ; i < wait.size() ; i++)
-		wait_list[i] = wait[i].native_event;
+	cl_event *wait_list;
+	cl_uint wait_size = make_wait_list(events, wait_list);
 	cl_event e;
 	cl_uint status = clEnqueueNDRangeKernel(
 		parent_context->queue,
-		k,
-		size.size(),
+		r.native,
+		dims,
 		global_work_offset,
 		global_work_size,
-		local_work_size,
-		wait.size(),
-		wait.size() == 0 ? nullptr : wait_list,
+		nullptr,
+		wait_size,
+		wait_list,
 		&e
 	);
+	delete [] wait_list;
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't run kernel");
-	return event(e);
+	return event(parent_context, e);
 }
 
 
 
-cl::program::program(context *parent, string filename) : parent(parent) {
+cl::program::program(context *parent, string data) : parent(parent) {
 	// load code
-	string data = read_file(filename);
 	const char *text = data.c_str();
 	size_t length = data.size();
 	cl_int status;
-	native_program = clCreateProgramWithSource(
-		parent->ctx, 1,
+	native = clCreateProgramWithSource(
+		parent->native, 1,
 		&text,
 		&length,
 		&status
@@ -222,7 +287,7 @@ cl::program::program(context *parent, string filename) : parent(parent) {
 	// compile code
 	cl_device_id devs[] = {parent->device};
 	status = clBuildProgram(
-		native_program,
+		native,
 		1,
 		devs,
 		nullptr,
@@ -238,7 +303,7 @@ cl::program::program(context *parent, string filename) : parent(parent) {
 	char build_log[2048];
 	size_t log_length;
 	status = clGetProgramBuildInfo(
-		native_program,
+		native,
 		parent->device,
 		CL_PROGRAM_BUILD_LOG,
 		sizeof(build_log),
@@ -247,8 +312,8 @@ cl::program::program(context *parent, string filename) : parent(parent) {
 	);
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't get build log");
-	if(log_length > 0)
-		cerr << "Build log for " << filename << ":" << endl << build_log << endl;
+	if(log_length > 3)
+		cerr << "Build log:\n" << build_log << endl;
 	if(old_status != CL_SUCCESS)
 		throw error(old_status, "Couldn't build CL program from source");
 }
@@ -257,7 +322,7 @@ cl::program::program(context *parent, string filename) : parent(parent) {
 
 kernel cl::program::operator[](string name) {
 	cl_int status;
-	cl_kernel k = clCreateKernel(native_program, name.c_str(), &status);
+	cl_kernel k = clCreateKernel(native, name.c_str(), &status);
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't create kernel from program");
 	return kernel(parent, k);
@@ -265,8 +330,35 @@ kernel cl::program::operator[](string name) {
 
 
 
+kernel::kernel(context *parent_context, cl_kernel k)
+		: native(k), parent_context(parent_context) {
+	cl_uint value;
+	cl_int status = clGetKernelInfo(k, CL_KERNEL_NUM_ARGS, sizeof(value), &value, nullptr);
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't get argument count");
+	argument_count = value;
+}
+
+
+
+void kernel::arg(cl_uint i, buffer &buf) {
+	construct(buf, parent_context);
+	cl_uint status = clSetKernelArg(
+		native,
+		i,
+		sizeof(cl_mem),
+		&buf.native
+	);
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't set kernel argument to buffer");
+}
+
+
+
+// Strings from constants
+#define e(m) case m: return #m;
+
 string cl::status_to_string(cl_int status) {
-	#define e(m) case m: return #m;
 	switch(status) {
 		e(CL_SUCCESS                                  )
 		e(CL_DEVICE_NOT_FOUND                         )
@@ -318,7 +410,229 @@ string cl::status_to_string(cl_int status) {
 		e(CL_INVALID_MIP_LEVEL                        )
 		e(CL_INVALID_GLOBAL_WORK_SIZE                 )
 		e(CL_INVALID_PROPERTY                         )
-		default: return "";
+		default: return "?";
 	}
-	#undef e
 }
+
+string command_to_string(cl_command_type t) {
+	switch(t) {
+		e(CL_COMMAND_NDRANGE_KERNEL      )
+		e(CL_COMMAND_TASK                )
+		e(CL_COMMAND_NATIVE_KERNEL       )
+		e(CL_COMMAND_READ_BUFFER         )
+		e(CL_COMMAND_WRITE_BUFFER        )
+		e(CL_COMMAND_COPY_BUFFER         )
+		e(CL_COMMAND_READ_IMAGE          )
+		e(CL_COMMAND_WRITE_IMAGE         )
+		e(CL_COMMAND_COPY_IMAGE          )
+		e(CL_COMMAND_COPY_IMAGE_TO_BUFFER)
+		e(CL_COMMAND_COPY_BUFFER_TO_IMAGE)
+		e(CL_COMMAND_MAP_BUFFER          )
+		e(CL_COMMAND_MAP_IMAGE           )
+		e(CL_COMMAND_UNMAP_MEM_OBJECT    )
+		e(CL_COMMAND_MARKER              )
+		e(CL_COMMAND_ACQUIRE_GL_OBJECTS  )
+		e(CL_COMMAND_RELEASE_GL_OBJECTS  )
+		e(CL_COMMAND_READ_BUFFER_RECT    )
+		e(CL_COMMAND_WRITE_BUFFER_RECT   )
+		e(CL_COMMAND_COPY_BUFFER_RECT    )
+		e(CL_COMMAND_USER                )
+		default: return "?";
+	}
+}
+
+string execution_status_to_string(cl_int t) {
+	switch(t) {
+		e(CL_COMPLETE )
+		e(CL_RUNNING  )
+		e(CL_SUBMITTED)
+		e(CL_QUEUED   )
+		default: return "?";
+	}
+}
+
+#undef e
+#define f(m) if(t & m) { t &= ~m; if(s.tellp() > 0) s << '|'; s << #m; }
+#define other_flags() \
+	if(t != 0) { \
+		if(s.tellp() > 0) \
+			s << '|'; \
+		s << t; \
+	}
+
+string device_type_to_string(cl_device_type t) {
+	ostringstream s;
+	f(CL_DEVICE_TYPE_DEFAULT    )
+	f(CL_DEVICE_TYPE_CPU        )
+	f(CL_DEVICE_TYPE_GPU        )
+	f(CL_DEVICE_TYPE_ACCELERATOR)
+	f(CL_DEVICE_TYPE_ALL        )
+	other_flags()
+	return s.str();
+}
+
+string buffer_flags_to_string(cl_mem_flags t) {
+	ostringstream s;
+	f(CL_MEM_READ_WRITE    )
+	f(CL_MEM_WRITE_ONLY    )
+	f(CL_MEM_READ_ONLY     )
+	f(CL_MEM_USE_HOST_PTR  )
+	f(CL_MEM_ALLOC_HOST_PTR)
+	f(CL_MEM_COPY_HOST_PTR )
+	other_flags()
+	return s.str();
+}
+
+#undef f
+#undef other_flags
+
+
+// Debug output
+
+#define MAKE_INFO(wrapper_type, info_type, info_function) \
+template<typename T> \
+T info(const wrapper_type &d, info_type name) { \
+	size_t size; \
+	cl_int status = info_function(d.native, name, 0, NULL, &size); \
+	if(status != CL_SUCCESS) \
+		throw error(status, "Couldn't query info"); \
+	if(size > sizeof(T)) \
+		throw std::domain_error("Result type too small"); \
+	T buf; \
+	status = info_function(d.native, name, size, &buf, &size); \
+	if(status != CL_SUCCESS) \
+		throw error(status, "Couldn't query device info"); \
+	return buf; \
+} \
+\
+string info_str(const wrapper_type &d, info_type name) { \
+	size_t size; \
+	cl_int status = info_function(d.native, name, 0, NULL, &size); \
+	if(status != CL_SUCCESS) \
+		throw error(status, "Couldn't query device info"); \
+	char buf[size]; \
+	status = info_function(d.native, name, size, buf, &size); \
+	if(status != CL_SUCCESS) \
+		throw error(status, "Couldn't query device info"); \
+	return buf; \
+} \
+\
+template<typename T> \
+vector<T> info_vec(const wrapper_type &d, info_type name) { \
+	size_t size; \
+	cl_int status = info_function(d.native, name, 0, NULL, &size); \
+	if(status != CL_SUCCESS) \
+		throw error(status, "Couldn't query device info"); \
+	T buf[size / sizeof(T)]; \
+	status = info_function(d.native, name, size, buf, &size); \
+	if(status != CL_SUCCESS) \
+		throw error(status, "Couldn't query device info"); \
+	vector<T> out; \
+	for(size_t i = 0 ; i < size / sizeof(T) ; i++) \
+		out.push_back(buf[i]); \
+	return out; \
+}
+
+
+
+MAKE_INFO(device, cl_device_info, clGetDeviceInfo);
+
+ostream &cl::operator<<(ostream &o, const device &d) {
+	o << "  Device (" << info_str(d, CL_DEVICE_NAME) << ")\n"
+		<< "    Type: " << device_type_to_string(info<cl_device_type>(d, CL_DEVICE_TYPE)) << '\n'
+		<< "    Vendor: " << info_str(d, CL_DEVICE_VENDOR) << '\n'
+		<< "    Version: " << info_str(d, CL_DEVICE_VERSION) << '\n'
+		<< "    Profile: " << info_str(d, CL_DEVICE_PROFILE) << '\n'
+		<< "    Language Version: " << info_str(d, CL_DEVICE_OPENCL_C_VERSION) << '\n'
+		<< "    Driver Version: " << info_str(d, CL_DRIVER_VERSION) << '\n'
+		<< "    Memory size: " << info<cl_ulong>(d, CL_DEVICE_GLOBAL_MEM_SIZE) / (1024 * 1024) << 'M' << '\n'
+		<< "    Compute units: " << info<cl_uint>(d, CL_DEVICE_MAX_COMPUTE_UNITS) << '\n'
+		<< "    Cache size: " << info<cl_ulong>(d, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE) / 1024 << 'k' << '\n'
+		<< "    Cacheline size: " << info<cl_uint>(d, CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE) << '\n'
+	;
+	return o;
+}
+
+
+
+MAKE_INFO(platform, cl_platform_info, clGetPlatformInfo);
+
+ostream &cl::operator<<(ostream &o, const platform &p) {
+	o
+		<< "Platform (" << info_str(p, CL_PLATFORM_NAME) << ")\n"
+		<< "  Vendor: " << info_str(p, CL_PLATFORM_VENDOR) << '\n'
+		<< "  Version: " << info_str(p, CL_PLATFORM_VERSION) << '\n'
+		<< "  Profile: " << info_str(p, CL_PLATFORM_PROFILE) << '\n'
+		<< "  Extensions: " << info_str(p, CL_PLATFORM_EXTENSIONS) << '\n'
+	;
+	for(auto d : p.all_devices())
+		o << d << '\n';
+	return o;
+}
+
+
+
+MAKE_INFO(context, cl_context_info, clGetContextInfo);
+
+ostream &cl::operator<<(ostream &o, const context &p) {
+	o << "Context:"
+		<< " id=" << p.native
+		<< " refs=" << info<cl_uint>(p, CL_CONTEXT_REFERENCE_COUNT)
+		<< '\n';
+	for(auto d : info_vec<cl_device_id>(p, CL_CONTEXT_DEVICES))
+		o << device(d);
+	return o;
+}
+
+
+
+MAKE_INFO(program, cl_program_info, clGetProgramInfo)
+
+ostream &cl::operator<<(ostream &o, const program &p) {
+	return o << "Program:"
+		<< " id=" << p.native
+		<< " devices=" << info<cl_uint>(p, CL_PROGRAM_NUM_DEVICES)
+		<< " refs=" << info<cl_uint>(p, CL_PROGRAM_REFERENCE_COUNT);
+}
+
+
+
+MAKE_INFO(kernel, cl_kernel_info, clGetKernelInfo)
+
+ostream &cl::operator<<(ostream &o, const kernel &p) {
+	return o << "Kernel(" << info_str(p, CL_KERNEL_FUNCTION_NAME) << "/" << info<cl_uint>(p, CL_KERNEL_NUM_ARGS) << ')'
+		<< " id=" << p.native
+		<< " refs=" << info<cl_uint>(p, CL_KERNEL_REFERENCE_COUNT);
+}
+
+
+
+MAKE_INFO(event, cl_event_info, clGetEventInfo)
+
+ostream &cl::operator<<(ostream &o, const event &p) {
+	return o << "Event:"
+		<< " id=" << p.native
+		<< " command=" << command_to_string(info<cl_command_type>(p, CL_EVENT_COMMAND_TYPE))
+		<< " status=" << execution_status_to_string(info<cl_int>(p, CL_EVENT_COMMAND_EXECUTION_STATUS))
+		<< " refs=" << info<cl_uint>(p, CL_EVENT_REFERENCE_COUNT);
+}
+
+
+
+MAKE_INFO(buffer, cl_mem_info, clGetMemObjectInfo)
+
+ostream &cl::operator<<(ostream &o, const buffer &p) {
+	if(p.native == 0)
+		return o << "Buffer[" << p.name << "]: (staged)"
+			<< " size=" << p.size;
+	return o << "Buffer[" << p.name << "]:" 
+		<< " id=" << p.native
+		<< " flags=" << buffer_flags_to_string(info<cl_mem_flags>(p, CL_MEM_FLAGS))
+		<< " size=" << info<size_t>(p, CL_MEM_SIZE)
+		<< " offset=" << info<cl_uint>(p, CL_MEM_OFFSET)
+		<< " maps=" << info<cl_uint>(p, CL_MEM_MAP_COUNT)
+		<< " refs=" << info<cl_uint>(p, CL_MEM_REFERENCE_COUNT);
+}
+
+
+
