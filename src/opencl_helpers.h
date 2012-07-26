@@ -1,7 +1,14 @@
 #ifndef __OPENCL_HELPERS_H__
 #define __OPENCL_HELPERS_H__
 
+#include "config.h"
+
+#ifdef HAVE_OPENCL
+
 #include <CL/cl.h>
+#if HAVE_AMD_FFT
+#	include <clAmdFft.h>
+#endif
 #include <string>
 #include <fstream>
 #include <iostream>
@@ -10,6 +17,7 @@
 #include <initializer_list>
 #include <stdexcept>
 #include <boost/type_traits/is_same.hpp>
+
 
 /**
  * Simple C++ wrappers for OpenCL because <code>cl.hpp</code> is weird.
@@ -24,6 +32,10 @@ struct program;
 struct kernel;
 struct event;
 struct after;
+#if HAVE_AMD_FFT
+struct fft;
+struct fft_run;
+#endif
 
 
 
@@ -85,6 +97,8 @@ struct event {
 	event(event &&) = default;
 
 	event(const context *, cl_event);
+
+	after then();
 };
 
 /** Output some information in human-readable format */
@@ -102,7 +116,7 @@ struct after {
 
 	// DON'T allow copying
 	after(const after &) = delete;
-	after(after &&) = default;
+	after(after &&a) : events(a.events), parent_context(a.parent_context) {};
 
 	/**
 	 * Construct the list from a list of events. This is the user constructor.
@@ -129,6 +143,11 @@ struct after {
 	/** Queue a computation after these events */
 	event operator()(const kernel &);
 
+#if HAVE_AMD_FFT
+	/** Queue an FFT after these events */
+	event operator()(const fft_run &&r);
+#endif
+
 	/** Returns when all events were triggered. */
 	void resume();
 };
@@ -146,6 +165,8 @@ struct context {
 	// DO allow copying
 	context(const context &) = default;
 	context(context &&) = default;
+
+	~context();
 
 
 	/** Create a context for the default platform */
@@ -372,10 +393,45 @@ static inline buffer_read operator>>(buffer &b, std::array<T, n> &a) {
 
 
 
+#if HAVE_AMD_FFT
+/**
+ * An FFT plan that can be run on the CL device.
+ */
+struct fft {
+	clAmdFftPlanHandle native;
+	const context *parent_context;
+	size_t lengths[3];
+	clAmdFftDim dim;
+		
+	fft(size_t x) : lengths{x}, dim{CLFFT_1D} {}
+	fft(size_t x, size_t y) : lengths{x, y}, dim{CLFFT_2D} {}
+	fft(size_t x, size_t y, size_t z) : lengths{x, y, z}, dim{CLFFT_3D} {}
+
+	/** Run a forward FFT. */
+	fft_run forward(buffer &in, buffer &out);
+
+	/** Run a backward FFT. */
+	fft_run backward(buffer &in, buffer &out);
+};
+
+/**
+ * An FFT operation that can be enqueued using {@ref after::operator()}
+ */
+struct fft_run {
+	fft &that;
+	clAmdFftDirection	dir;
+	buffer &in, &out;
+
+	fft_run(const fft_run &) = delete;
+	fft_run(fft_run &&) = default;
+	fft_run(fft &that, clAmdFftDirection dir, buffer &in, buffer &out) : that(that), dir(dir), in(in), out(out) {}
+};
+#endif
 
 
 
 
 }; // cl::
 
+#endif
 #endif

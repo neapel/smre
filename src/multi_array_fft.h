@@ -4,12 +4,13 @@
 extern "C" {
 	#include <fftw3.h>
 }
-
-#include <iostream>
-#include <stdexcept>
 #include <boost/multi_array.hpp>
 #include <array>
+#include <stdexcept>
+#include <complex>
 
+#if 0
+#include <iostream>
 #include "../test/multi_array_compare.h"
 template<class In, class Out>
 class fft {
@@ -133,6 +134,73 @@ template<class In, class Out>
 fft<In, Out> plan_idct(In &in, Out &out, unsigned flags = 0) {
 	return {in, out, FFTW_REDFT01, flags};
 }
+
+#endif
+
+namespace fftw {
+
+template<class In, class Out>
+std::array<int, In::dimensionality> get_shape(const In &in, const Out &out) {
+	const size_t N = In::dimensionality;
+	static_assert(N == Out::dimensionality, "Arrays must have same rank.");
+	if(!is_continuous(in) || !is_continuous(out))
+		throw std::invalid_argument("Only continuous arrays are supported.");
+	for(size_t i = 0 ; i < N ; i++)
+		if(in.index_bases()[i] != 0 || out.index_bases()[i] != 0)
+			throw std::invalid_argument("Nonzero bases are not supported.");
+	std::array<int, N> shape;
+	for(size_t i = 0 ; i < N ; i++)
+		shape[i] = static_cast<int>(in.shape()[i]);
+	return shape;
+}
+
+template<class In, class Out>
+struct plan {
+};
+
+/** An FFTw[f] plan. */
+template<size_t dims>
+struct plan<boost::multi_array<std::complex<float>, dims>, boost::multi_array<std::complex<float>, dims>> {
+	typedef boost::multi_array<std::complex<float>, dims> in_t;
+	typedef boost::multi_array<std::complex<float>, dims> out_t;
+	fftwf_plan p;
+
+	plan(const in_t &in, out_t &out, int dir, unsigned int flags) {
+		switch(dir) {
+			case FFTW_FORWARD: break;
+			case FFTW_BACKWARD: break;
+			default: throw std::invalid_argument("Only C2C Fourier transform.");
+		}
+		auto shape = get_shape(in, out);
+
+		p = fftwf_plan_dft(dims, shape.data(),
+			const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
+			reinterpret_cast<fftwf_complex *>(out.origin()), dir, flags);
+	}
+
+	void operator()(){
+		fftwf_execute(p);	
+	}
+
+	~plan() {
+		fftwf_destroy_plan(p);
+	}
+};
+
+/** Todo: R2C, C2R, R2R, single, double */
+
+
+template<class In, class Out>
+plan<In, Out> forward(const In &in, Out &out, unsigned int flags = FFTW_ESTIMATE) {
+	return {in, out, FFTW_FORWARD, flags};
+}
+
+template<class In, class Out>
+plan<In, Out> backward(const In &in, Out &out, unsigned int flags = FFTW_ESTIMATE) {
+	return {in, out, FFTW_BACKWARD, flags};
+}
+
+};
 
 
 #endif

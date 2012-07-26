@@ -1,4 +1,6 @@
 #include "opencl_helpers.h"
+
+#ifdef HAVE_OPENCL
 #include <sstream>
 
 using namespace cl;
@@ -69,6 +71,11 @@ event::event(const context *c, cl_event e) : parent_context(c), native(e) {
 			[](cl_event e, cl_int, void *) { clog << "Event " << e << " COMPLETE" << endl; },
 			nullptr);
 	}
+}
+
+
+after event::then() {
+	return move( after{*this} );
 }
 
 
@@ -197,6 +204,13 @@ context::context() {
 
 context::context(platform p) {
 	construct(*this, p);
+}
+
+
+context::~context() {
+#if HAVE_AMD_FFT
+	//clAmdFftTeardown();
+#endif
 }
 
 
@@ -330,8 +344,7 @@ kernel cl::program::operator[](string name) {
 
 
 
-kernel::kernel(context *parent_context, cl_kernel k)
-		: native(k), parent_context(parent_context) {
+kernel::kernel(context *parent_context, cl_kernel k) : native(k), parent_context(parent_context) {
 	cl_uint value;
 	cl_int status = clGetKernelInfo(k, CL_KERNEL_NUM_ARGS, sizeof(value), &value, nullptr);
 	if(status != CL_SUCCESS)
@@ -352,6 +365,63 @@ void kernel::arg(cl_uint i, buffer &buf) {
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't set kernel argument to buffer");
 }
+
+
+#if HAVE_AMD_FFT
+fft_run fft::forward(buffer &in, buffer &out) {
+	return std::move( fft_run(*this, CLFFT_FORWARD, in, out) );
+}
+
+fft_run fft::backward(buffer &in, buffer &out) {
+	return std::move( fft_run(*this, CLFFT_BACKWARD, in, out) );
+}
+
+
+void construct(fft &that, const context *ctx) {
+	cl_uint status = clAmdFftCreateDefaultPlan(
+		&that.native,
+		ctx->native,
+		that.dim,
+		that.lengths
+	);
+	status |= clAmdFftSetPlanPrecision(that.native, CLFFT_SINGLE);
+	status |= clAmdFftSetPlanScale(that.native, CLFFT_FORWARD, 1);
+	status |= clAmdFftSetPlanScale(that.native, CLFFT_BACKWARD, 1);
+	// stride x:1, y:len_x, z:len_x*len_y
+	status |= clAmdFftSetLayout(that.native, CLFFT_COMPLEX_INTERLEAVED, CLFFT_COMPLEX_INTERLEAVED);
+	status |= clAmdFftSetResultLocation(that.native, CLFFT_OUTOFPLACE);
+
+	if(status != CL_SUCCESS) throw error(status, "Couldn't plan FFT.");
+}
+
+
+event after::operator()(const fft_run &&r) {
+	construct(r.that, parent_context);
+	construct(r.in, parent_context);
+	construct(r.out, parent_context);
+
+	cl_mem in[] = {r.in.native}, out[] = {r.out.native};
+	cl_command_queue queue[] = {parent_context->queue};
+
+	cl_event *wait_list;
+	cl_uint wait_size = make_wait_list(events, wait_list);
+	cl_event e;
+	cl_uint status = clAmdFftEnqueueTransform(
+		r.that.native, // handle
+		r.dir, // direction
+		1, // num queues and events
+		queue, // queues
+		wait_size, wait_list, &e,
+		in, out,
+		nullptr // temp
+	);
+	delete [] wait_list;
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't run FFT.");
+	return event(parent_context, e);
+}
+
+#endif
 
 
 
@@ -410,6 +480,14 @@ string cl::status_to_string(cl_int status) {
 		e(CL_INVALID_MIP_LEVEL                        )
 		e(CL_INVALID_GLOBAL_WORK_SIZE                 )
 		e(CL_INVALID_PROPERTY                         )
+#if HAVE_AMD_FFT
+		e(CLFFT_NOTIMPLEMENTED)
+		e(CLFFT_FILE_NOT_FOUND)
+		e(CLFFT_FILE_CREATE_FAILURE)
+		e(CLFFT_VERSION_MISMATCH)
+		e(CLFFT_INVALID_PLAN)
+		e(CLFFT_DEVICE_NO_DOUBLE)
+#endif
 		default: return "?";
 	}
 }
@@ -629,10 +707,12 @@ ostream &cl::operator<<(ostream &o, const buffer &p) {
 		<< " id=" << p.native
 		<< " flags=" << buffer_flags_to_string(info<cl_mem_flags>(p, CL_MEM_FLAGS))
 		<< " size=" << info<size_t>(p, CL_MEM_SIZE)
-		<< " offset=" << info<cl_uint>(p, CL_MEM_OFFSET)
+		<< " offset=" << info<size_t>(p, CL_MEM_OFFSET)
 		<< " maps=" << info<cl_uint>(p, CL_MEM_MAP_COUNT)
 		<< " refs=" << info<cl_uint>(p, CL_MEM_REFERENCE_COUNT);
 }
 
 
 
+
+#endif

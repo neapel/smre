@@ -11,6 +11,7 @@ using namespace std;
 int main(int, char**) {
 	typedef multi_array_types::index_range range;
 
+#if 0
 	// normal DCT:
 	{
 		typedef multi_array<double, 2> array_t;
@@ -40,6 +41,7 @@ int main(int, char**) {
 		for(auto e : all_elements(out_inner))
 			assert( abs(e) < 1e-6 );
 	}
+#endif
 
 #if 0
 	// DCT of a view

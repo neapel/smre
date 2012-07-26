@@ -6,7 +6,7 @@
 
 namespace cl {
 
-/** Read data from the buffer into the multi-array */
+/** Read data from the buffer into the multi-array. */
 template<template<typename, size_t, typename> class M, typename T, size_t N, typename A>
 static inline buffer_read operator>>(buffer &b, M<T,N,A> &a) {
 	if(!is_continuous(a))
@@ -15,6 +15,7 @@ static inline buffer_read operator>>(buffer &b, M<T,N,A> &a) {
 }
 
 
+/** Read date from the multi-array into the buffer. */
 template<template<typename, size_t, typename> class M, typename T, size_t N, typename A>
 static inline buffer_write operator<<(buffer &b, const M<T,N,A> &a) {
 	if(!is_continuous(a))

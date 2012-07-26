@@ -4,5 +4,7 @@
 #define VERSION "${VERSION}"
 
 #cmakedefine HAVE_MATIO 1
+#cmakedefine HAVE_OPENCL 1
+#cmakedefine HAVE_AMD_FFT 1
 
 #endif

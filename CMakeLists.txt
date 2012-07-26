@@ -33,11 +33,22 @@ endif()
 # OpenCL libraries
 option(USE_OPENCL "Build with OpenCL kernels" ON)
 if(USE_OPENCL)
-	find_package(OpenCL)
+	set(AMD_APP_SDK_ROOT "/opt/AMDAPP")
+	set(AMD_FFT_ROOT "${AMD_APP_SDK_ROOT}/fft")
+
+	find_package(OpenCL REQUIRED)
 	if(OpenCL_FOUND)
 		include_directories(${OpenCL_INCLUDE_DIRS})
 		require_libraries(${OpenCL_LIBRARIES})
 		set(HAVE_OPENCL  ${OpenCL_FOUND})
+
+		# AMD FFT libraries
+		find_package(AmdFFT REQUIRED)
+		if(AmdFFT_FOUND)
+			include_directories(${AmdFFT_INCLUDE_DIRS})
+			require_libraries(${AmdFFT_LIBRARIES})
+			set(HAVE_AMD_FFT ${AmdFFT_FOUND})
+		endif()
 	endif()
 endif()
 
@@ -47,6 +58,11 @@ find_package(FFTw REQUIRED)
 if(FFTw_FOUND)
 	include_directories(${FFTw_INCLUDE_DIRS})
 	require_libraries(${FFTw_LIBRARIES})
+endif()
+find_package(FFTwf REQUIRED)
+if(FFTwf_FOUND)
+	include_directories(${FFTwf_INCLUDE_DIRS})
+	require_libraries(${FFTwf_LIBRARIES})
 endif()
 
 
@@ -103,7 +119,7 @@ require_source_compiles("
 
 
 # Profiling
-option(USE_COVERAGE "Build with gcov and profiling support" ON)
+option(USE_COVERAGE "Build with gcov and profiling support" OFF)
 if(USE_COVERAGE)
 	set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} --coverage")
 	set(CMAKE_LINKER_FLAGS  "${CMAKE_LINKER_FLAGS} --coverage")

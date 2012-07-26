@@ -1,5 +1,5 @@
 #!/bin/sh
-mkdir build
-cd build
+mkdir -p __build
+cd __build
 cmake ..
 make
