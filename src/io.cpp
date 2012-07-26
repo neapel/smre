@@ -3,6 +3,7 @@
 // loaders
 #include "matlab_io.h"
 #include "plain_io.h"
+#include "gil_io.h"
 
 #include <stdexcept>
 
@@ -11,6 +12,9 @@ using namespace std;
 static io_factory *factories[] = {
 #ifdef HAVE_MATIO
 	new matlab_io(),
+#endif
+#ifdef HAVE_GIL
+	new gil_io(),
 #endif
 	new plain_io()
 };

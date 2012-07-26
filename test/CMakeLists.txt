@@ -43,6 +43,10 @@ if(HAVE_MATIO)
 endif()
 tiny_test(test_plain_io)
 
+if(HAVE_GIL)
+	tiny_test(test_gil_io "${MAT_DIR}/rgb8.jpg")
+endif()
+
 # opencl
 if(HAVE_OPENCL)
 	extra_file(test_opencl.cl)
