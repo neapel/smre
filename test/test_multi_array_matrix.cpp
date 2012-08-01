@@ -47,7 +47,7 @@ int main(int, char**) {
 
 		{
 			// modifying view modifies original:
-			auto b = B[ indices[index_range(0, 3)][1][index_range(0,5,2)] ];
+			auto b = B[ indices[boost::range(0, 3)][1][boost::range(0,5,2)] ];
 			assert(b[0][1] == 7);
 			auto m = make_matrix(b);
 			assert(m(0, 1) == 7);

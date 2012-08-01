@@ -19,7 +19,7 @@ int main(int, char**) {
 	cout << A[0] << endl;
 
 	// view
-	cout << A[ indices[-1][2][index_range(-1,3,2)][index_range(4,7)] ] << endl;
+	cout << A[ indices[-1][2][range(-1,3,2)][range(4,7)] ] << endl;
 	
 	// exact string
 	{

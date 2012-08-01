@@ -22,12 +22,8 @@ using namespace gil;
 using namespace std;
 
 
-static const size_t N = data_t::dimensionality;
-
-static const std::array<string, 3> channel_names{{ "r", "g", "b" }};
-
-template<class Image>
-static void read_image(string filename, Image &img) {
+template<class T>
+static void read_any_format(string filename, T &img) {
 #ifdef HAVE_JPEG
 	try {
 		img.recreate( jpeg_read_dimensions(filename) );
@@ -53,88 +49,28 @@ static void read_image(string filename, Image &img) {
 }
 
 
-// Reader
-gil_reader::gil_reader(string filename) : channel(0) {
-	rgb16_image_t img;
-	read_image(filename, img);
 
-	auto proper = view(img);
-
-	data.resize(extents[proper.num_channels()][proper.height()][proper.width()]);
-
-	for(size_t i = 0 ; i < proper.num_channels() ; i++) {
-		const auto chan = nth_channel_view(proper, i);
-		auto plane = data[i];
-		copy(chan.begin(), chan.end(), all_elements(plane));
-	}
-}
-
-void gil_reader::close() {
-}
-
-gil_reader::operator bool() {
-	return channel < data.shape()[0];
-}
-
-void gil_reader::operator>>(pair<string, data_t> &out) {
-	out.first = channel_names[channel];
-
-	std::array<size_t, N> size;
-	fill(size.begin(), size.end(), 1);
-	copy_backward(data.shape() + 1, data.shape() + 3, size.end());
-	out.second.resize(size);
-	const auto in_data = all_elements(data[channel]);
-	copy(in_data.begin(), in_data.end(), all_elements(out.second));
-
-	channel++;
+multi_array<float, 2> read_image(string filename) {
+	gray32_image_t input_image;
+	read_any_format(filename, input_image);
+	auto proper = view(input_image);
+	const auto w = proper.width(), h = proper.height();
+	multi_array<float, 2> data(extents[h][w]);
+	auto data_view = interleaved_view(w, h,
+			reinterpret_cast<gray32f_pixel_t *>( data.origin() ),
+			sizeof(float) * data.strides()[0] );
+	copy_and_convert_pixels(proper, data_view);
+	return data;
 }
 
 
-// Writer
-#if 0
-gil_writer::gil_writer(string filename) : filename(filename), data() {
-}
-
-void gil_writer::close() {
-}
-
-void gil_writer::operator<<(const pair<string, data_t> &in) {
-
-	if(data.num_elements() == 0)
-		data.resize(extents[1][in.second.shape()[N - 2]][in.second.shape()[N - 1]]);
-
-}
-#endif
-
-// Factory
-static bool is_gil(const string &filename) {
-	return false
-#ifdef HAVE_JPEG
-		|| iends_with(filename, ".jpg")
-		|| iends_with(filename, ".jpeg")
-#endif
-#ifdef HAVE_PNG
-		|| iends_with(filename, ".png")
-#endif
-#ifdef HAVE_TIFF
-		|| iends_with(filename, ".tif")
-		|| iends_with(filename, ".tiff")
-#endif
-	;
-}
-
-file_reader *gil_io::reader(string filename) const {
-	if(is_gil(filename))
-		return new gil_reader(filename);
-	return nullptr;
-}
-
-file_writer *gil_io::writer(string) const {
-#if 0
-	if(is_gil(filename))
-		return new gil_writer(filename);
-#endif
-	return nullptr;
+void write_image(string filename, const multi_array<float, 2> &data) {
+	auto data_view = interleaved_view( data.shape()[1], data.shape()[0],
+		reinterpret_cast<const gray32f_pixel_t *>( data.origin() ),
+		sizeof(float) * data.strides()[0] );
+	gray8_image_t out_image(data_view.dimensions());
+	copy_and_convert_pixels(data_view, view(out_image));
+	png_write_view(filename, view(out_image));
 }
 
 

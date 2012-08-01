@@ -1,106 +1,202 @@
 #include <iostream>
 #include <complex>
 
-std::ostream &operator<<(std::ostream &o, const std::complex<float> &c) {
-	o << c.real();
-	if(c.imag() != 0) {
-		if(c.imag() > 0) o << '+';
-		o << c.imag() << 'i';
-	}
-	return o;
-}
-
 #include "opencl_multi_array.h"
+#include "multi_array.h"
 #include "multi_array_operators.h"
-#include "multi_array_print.h"
 #include "multi_array_fft.h"
+#include "gil_io.h"
 
 using namespace cl;
 using namespace boost;
 using namespace std;
 using namespace mimas;
 
-const size_t w = 16, h = 8, kw = 4, kh = 4;
-typedef multi_array<complex<float>, 2> A;
+typedef complex<float> cfloat;
+typedef multi_array<float, 2> float_a;
+typedef multi_array<cfloat, 2> cfloat_a;
 
-void convolution_cpu_naive(const A &in, const A &kernel, A &out) {
-	for(size_t i = 0 ; i < w ; i++)
-		for(size_t j = 0 ; j < h ; j++) {
-			complex<float> sum = 0;
-			for(size_t ki = 0 ; ki < kw ; ki++)
-				for(size_t kj = 0 ; kj < kw ; kj++) {
-					sum += in[(i+ki) % w][(j+kj) % h] * kernel[ki][kj];
-				}
+template<class T1, class T2>
+multi_array<T1, 2> like(const multi_array<T2, 2> &r) {
+	return multi_array<T1, 2>(extents[r.shape()[1]][r.shape()[0]]);
+}
+
+cfloat_a to_complex(float_a in) {
+	auto out = like<cfloat>(in);
+	for(size_t y = 0 ; y < in.shape()[1] ; y++)
+		for(size_t x = 0 ; x < in.shape()[0] ; x++)
+			out[y][x] = in[y][x];
+	return out;
+}
+
+float_a from_complex(cfloat_a in) {
+	auto out = like<float>(in);
+	for(size_t y = 0 ; y < in.shape()[1] ; y++)
+		for(size_t x = 0 ; x < in.shape()[0] ; x++)
+			out[y][x] = in[y][x].real();
+	return out;
+}
+
+template<class T>
+multi_array<T, 2> pad(const multi_array<T, 2> &in, const size_t *shape) {
+	const size_t w = shape[0], h = shape[1], kw = in.shape()[0], kh = in.shape()[1];
+	// kernel origin = corner
+	const size_t dx = w - kw/2; //(w - kw) / 2;
+	const size_t dy = h - kh/2; //(h - kh) / 2;
+	multi_array<T, 2> out(extents[h][w]);
+	for(size_t y = 0 ; y < kh ; y++)
+		for(size_t x = 0 ; x < kw ; x++)
+			out[(y+dy) % h][(x+dx) % w] = in[y][x];
+	return out;
+}
+
+
+// the different convolutions:
+
+/** Naive convolution of real data. */
+float_a convolution_cpu_naive(const float_a &in, const float_a &kernel) {
+	const size_t w = in.shape()[0], h = in.shape()[1],
+	            kw = kernel.shape()[0], kh = kernel.shape()[1];
+	auto out = like<float>(in);
+	const size_t dx = w - kw/2, dy = h - kh/2; // kernel origin = center
+	for(size_t i = 0 ; i < h ; i++)
+		for(size_t j = 0 ; j < w ; j++) {
+			float sum = 0;
+			for(size_t ki = 0 ; ki < kh ; ki++)
+				for(size_t kj = 0 ; kj < kw ; kj++)
+					sum += in[(i+ki+dy) % w][(j+kj+dx) % h] * kernel[ki][kj];
 			out[i][j] = sum;
 		}
+
+	return out;
 }
 
-void convolution_cl_naive(const A &in, const A &kernel, A &out) {
-	(void)in; (void)kernel; (void)out;
+
+/** Convolve by computing R2C FFTs of data and kernel, return C2R FFT of product. */
+float_a convolution_cpu_fft(const float_a &in, const float_a &kernel_small) {
+	const auto kernel = pad(kernel_small, in.shape());
+	const size_t h = in.shape()[1], w = in.shape()[0];
+	cfloat_a in_f(extents[h][w/2+1]), kernel_f(extents[h][w/2+1]);
+	fftw::forward(in, in_f)();
+	fftw::forward(kernel, kernel_f)();
+	auto out_c = in_f * kernel_f;
+	auto out = like<float>(in);
+	fftw::backward(out_c, out)();
+	out /= float(w * h);
+	return out;
 }
 
-void convolution_cpu_fft(const A &in, const A &kernel, A &out) {
-	A in_(extents[w][h]), kernel_(extents[w][h]);
-	fftw::forward(in, in_)();
-	fftw::forward(kernel, kernel_)();
-	for(size_t i = 0 ; i < w ; i++)
-		for(size_t j = 0 ; j < h ; j++)
-			out[i][j] = in_[i][j] * kernel_[i][j];
-	fftw::backward(out, out)();
-	for(size_t i = 0 ; i < w ; i++)
-		for(size_t j = 0 ; j < h ; j++)
-			out[i][j] /= w * h;
+
+/** Naive convolution of real data on the CL device. */
+float_a convolution_cl_naive(context &ctx, const float_a &in, const float_a &kernel) {
+	const unsigned int h = in.shape()[1], w = in.shape()[0], kh = kernel.shape()[1], kw = kernel.shape()[0];
+	auto out = like<float>(in);
+	buffer b_in(sizeof(float) * w * h, stream_in),
+			b_out(sizeof(float) * w * h, stream_out),
+			b_kernel(sizeof(float) * kw * kh, stream_in);
+	
+	auto fold = ctx.compile(R"(
+		kernel void fold(global float *out, constant float *in, constant float *kern, uint w, uint h, uint kw, uint kh) {
+			const uint x = get_global_id(0), y = get_global_id(1);
+			const uint dx = w - kw/2, dy = h - kh/2;
+			float sum = 0;
+			for(uint ky = 0 ; ky < kh ; ky++)
+				for(uint kx = 0 ; kx < kw ; kx++)
+					sum += in[((x+kx+dx) % w) + ((y+ky+dy) % h) * w] * kern[kx + ky * kw];
+			out[x + y * w] = sum;
+		}
+	)")["fold"];
+
+	after{
+		ctx(b_in << in),
+		ctx(b_kernel << kernel)
+	}(fold.args(b_out, b_in, b_kernel, w, h, kw, kh).size({w, h}))
+		.then()(b_out >> out)
+		.then().resume();
+	return out;
 }
 
-void convolution_cl_fft(context &ctx, const A &in, const A &kernel, A &out) {
-	const size_t N = sizeof(complex<float>) * w * h;
+
+/** Convolve by computing (on the CL device) R2C FFTs of data and kernel, return C2R FFT of product. */
+float_a convolution_cl_fft(context &ctx, const float_a &in, const float_a &kernel_small) {
+	auto kernel = pad(to_complex(kernel_small), in.shape());
+	auto in_c = to_complex(in);
+	auto out_c = like<cfloat>(in);
+	const unsigned int h = in.shape()[1], w = in.shape()[0];
+	const unsigned int N = sizeof(complex<float>) * w * h;
 	buffer b_in(N, stream_in), b_temp(N, temp), b_out(N, stream_out),
-			 b_kernel_in(N, stream_in), b_kernel_out(N, full_access);
+			 b_kernel_in(N, stream_in), b_kernel_out(N, temp);
 
 	fft plan(w, h);
 	auto mult = ctx.compile(R"(
-		kernel void multiply(global float2 *data, constant float2 *kern) {
-			const uint tid = get_global_id(0);
+		kernel void multiply(global float2 *data, constant float2 *kern, uint w, uint h) {
+			const uint x = get_global_id(0);
+			const uint y = get_global_id(1);
+			const uint tid = x + y * w;
 			const float dr = data[tid].x, di = data[tid].y, kr = kern[tid].x, ki = kern[tid].y;
 			data[tid].x = dr * kr - di * ki;
-			data[tid].y = di * kr - dr * ki;
+			data[tid].y = dr * ki + di * kr;
 		}
 	)")["multiply"];
 
 	after{
-		ctx(b_in << in)
+		ctx(b_in << in_c)
 			.then()(plan.forward(b_in, b_temp)),
 		ctx(b_kernel_in << kernel)
 			.then()(plan.forward(b_kernel_in, b_kernel_out))
-	}(mult.args(b_temp, b_kernel_out).size({N/2}))
+	}(mult.args(b_temp, b_kernel_out, w, h).size({w,h}))
 		.then()(plan.backward(b_temp, b_out))
-		.then()(b_out >> out)
+		.then()(b_out >> out_c)
 		.then().resume();
+
+	return from_complex(out_c);
 }
 
 
-int main(int, char**) {
+
+
+int main(int argc, char **argv) {
+	if(argc != 4) {
+		cerr << "usage: " << argv[0] << " <input.png> <kernel.png> <output-prefix>" << endl;
+		return EXIT_FAILURE;
+	}
+	string base(argv[3]);
+
+	// load image
+	auto in = read_image(argv[1]);
+
+	// load and normalize kernel
+#if 1
+	auto kernel = read_image(argv[2]);
+	float kernel_sum = 0;
+	for(size_t i = 0 ; i < kernel.shape()[1] ; i++)
+		for(size_t j = 0 ; j < kernel.shape()[0] ; j++)
+			kernel_sum += kernel[i][j];
+	kernel /= kernel_sum;
+#else
+	float_a kernel(extents[1][1]);
+	kernel[0][0] = 1;
+#endif
+
+	// output
+	auto out = like<float>(in);
+
+	// run each method:
+	cerr << "cpu fft" << endl;
+	write_image(base + "-cpu-fft.png", convolution_cpu_fft(in, kernel));
+
+	cerr << "cpu naive" << endl;
+	write_image(base + "-cpu-naive.png", convolution_cpu_naive(in, kernel));
+
+#if HAVE_OPENCL
 	context ctx;
+	cerr << "opencl naive" << endl;
+	write_image(base + "-cl-naive.png", convolution_cl_naive(ctx, in, kernel));
 
-	// arrays
-	A in(extents[w][h]), out(extents[w][h]), kernel(extents[w][h]);
-
-	for(size_t i = 0 ; i < w ; i++)
-		for(size_t j = 0 ; j < h ; j++)
-			in[i][j] = 1.0f * rand() / RAND_MAX;
-	for(size_t i = 0 ; i < kw ; i++)
-		for(size_t j = 0 ; j < kh ; j++)
-			kernel[i][j] =  1.0f * rand() / RAND_MAX;
-
-	cout << in << " in\n" << kernel << " kernel\n";
-
-	convolution_cpu_fft(in, kernel, out);
-	cout << out << " cpu fft" << endl;
-
-	convolution_cpu_naive(in, kernel, out);
-	cout << out << " cpu naive" << endl;
-
-	//convolution_cl_fft(ctx, in, kernel, out);
-	//cout << out << " cl fft" << endl;
+#if HAVE_AMD_FFT
+	cerr << "opencl fft" << endl;
+	write_image(base + "-cl-fft.png", convolution_cl_fft(ctx, in, kernel));
+#endif
+#endif
 
 }

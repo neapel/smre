@@ -402,10 +402,14 @@ struct fft {
 	const context *parent_context;
 	size_t lengths[3];
 	clAmdFftDim dim;
-		
+	
+	fft(const fft &) = delete;
+	fft(fft &&) = default;
+
 	fft(size_t x) : lengths{x}, dim{CLFFT_1D} {}
 	fft(size_t x, size_t y) : lengths{x, y}, dim{CLFFT_2D} {}
 	fft(size_t x, size_t y, size_t z) : lengths{x, y, z}, dim{CLFFT_3D} {}
+	~fft();
 
 	/** Run a forward FFT. */
 	fft_run forward(buffer &in, buffer &out);

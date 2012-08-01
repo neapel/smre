@@ -150,7 +150,7 @@ std::array<int, In::dimensionality> get_shape(const In &in, const Out &out) {
 			throw std::invalid_argument("Nonzero bases are not supported.");
 	std::array<int, N> shape;
 	for(size_t i = 0 ; i < N ; i++)
-		shape[i] = static_cast<int>(in.shape()[i]);
+		shape[i] = static_cast<int>(std::max(in.shape()[i], out.shape()[i]));
 	return shape;
 }
 
@@ -158,7 +158,7 @@ template<class In, class Out>
 struct plan {
 };
 
-/** An FFTw[f] plan. */
+/** Complex to Complex FFT. */
 template<size_t dims>
 struct plan<boost::multi_array<std::complex<float>, dims>, boost::multi_array<std::complex<float>, dims>> {
 	typedef boost::multi_array<std::complex<float>, dims> in_t;
@@ -172,6 +172,9 @@ struct plan<boost::multi_array<std::complex<float>, dims>, boost::multi_array<st
 			default: throw std::invalid_argument("Only C2C Fourier transform.");
 		}
 		auto shape = get_shape(in, out);
+		for(size_t i = 0 ; i < dims ; i++)
+			if(in.shape()[i] != out.shape()[i])
+				throw std::invalid_argument("Input and output arrays must be of same size.");
 
 		p = fftwf_plan_dft(dims, shape.data(),
 			const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
@@ -187,7 +190,70 @@ struct plan<boost::multi_array<std::complex<float>, dims>, boost::multi_array<st
 	}
 };
 
-/** Todo: R2C, C2R, R2R, single, double */
+
+/** Real to Complex FFT. */
+template<size_t dims>
+struct plan<boost::multi_array<float, dims>, boost::multi_array<std::complex<float>, dims>> {
+	typedef boost::multi_array<float, dims> in_t;
+	typedef boost::multi_array<std::complex<float>, dims> out_t;
+	fftwf_plan p;
+
+	plan(const in_t &in, out_t &out, int dir, unsigned int flags) {
+		if(dir != FFTW_FORWARD)
+			throw std::invalid_argument("R2C transform must be forward.");
+		auto shape = get_shape(in, out);
+		if(out.shape()[dims-1] != in.shape()[dims-1] / 2 + 1)
+			throw std::invalid_argument("Width of output must be input width/2 + 1");
+		for(size_t i = 0 ; i < dims-1 ; i++)
+			if(in.shape()[i] != out.shape()[i])
+				throw std::invalid_argument("Other dimensions must be same size.");
+
+		p = fftwf_plan_dft_r2c(dims, shape.data(), const_cast<float *>(in.origin()),
+				reinterpret_cast<fftwf_complex *>(out.origin()), flags);
+	}
+
+	void operator()(){
+		fftwf_execute(p);	
+	}
+
+	~plan() {
+		fftwf_destroy_plan(p);
+	}
+};
+
+
+/** Complex to Real FFT. */
+template<size_t dims>
+struct plan<boost::multi_array<std::complex<float>, dims>, boost::multi_array<float, dims>> {
+	typedef boost::multi_array<std::complex<float>, dims> in_t;
+	typedef boost::multi_array<float, dims> out_t;
+	fftwf_plan p;
+
+	plan(const in_t &in, out_t &out, int dir, unsigned int flags) {
+		if(dir != FFTW_BACKWARD)
+			throw std::invalid_argument("C2R transform must be backward.");
+		auto shape = get_shape(in, out);
+		if(in.shape()[dims-1] != out.shape()[dims-1] / 2 + 1)
+			throw std::invalid_argument("Width of input must be output width/2 + 1");
+		for(size_t i = 0 ; i < dims-1 ; i++)
+			if(in.shape()[i] != out.shape()[i])
+				throw std::invalid_argument("Other dimensions must be same size.");
+
+		p = fftwf_plan_dft_c2r(dims, shape.data(),
+				const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
+				out.origin(), flags);
+	}
+
+	void operator()(){
+		fftwf_execute(p);	
+	}
+
+	~plan() {
+		fftwf_destroy_plan(p);
+	}
+};
+
+/** Todo: R2R, double */
 
 
 template<class In, class Out>

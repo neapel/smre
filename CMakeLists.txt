@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8)
 project("SMRE" CXX)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
 
 include_directories(
 	"abstract"
@@ -8,7 +8,7 @@ include_directories(
 )
 
 macro(require_libraries LIBS)
-	set(CMAKE_REQUIRED_LIBRARIES  ${CMAKE_REQUIRED_LIBRARIES} ${LIBS})
+	list(APPEND CMAKE_REQUIRED_LIBRARIES ${LIBS})
 endmacro()
 
 
@@ -25,7 +25,7 @@ if(USE_MATIO)
 	if(MatIO_FOUND)
 		include_directories(${MatIO_INCLUDE_DIRS})
 		require_libraries(${MatIO_LIBRARIES})
-		set(HAVE_MATIO  ${MatIO_FOUND})
+		set(HAVE_MATIO ${MatIO_FOUND})
 	endif()
 endif()
 
@@ -40,7 +40,7 @@ if(USE_OPENCL)
 	if(OpenCL_FOUND)
 		include_directories(${OpenCL_INCLUDE_DIRS})
 		require_libraries(${OpenCL_LIBRARIES})
-		set(HAVE_OPENCL  ${OpenCL_FOUND})
+		set(HAVE_OPENCL ${OpenCL_FOUND})
 
 		# AMD FFT libraries
 		find_package(AmdFFT REQUIRED)
@@ -120,8 +120,8 @@ endmacro()
 if(CMAKE_COMPILER_IS_GNUCXX)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra --std=c++0x")
 	add_definitions(-Wall -Wextra --std=c++0x)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3")
-	add_definitions(-g3)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g3")
+	add_definitions(-O3 -g3)
 endif()
 
 require_source_compiles("
@@ -169,7 +169,7 @@ if(DOXYGEN_FOUND)
 	set(DOXYGEN_SOURCE_DIR  "${CMAKE_SOURCE_DIR}/src")
 	set(DOXYGEN_OUTPUT_DIR  "${CMAKE_CURRENT_BINARY_DIR}/doc")
 	set(DOXYGEN_INCLUDE_PATH  "")
-	STRING(REGEX REPLACE ";" " " DOXYGEN_INPUT_LIST "${DOXYGEN_SOURCE_DIR}")
+	string(REGEX REPLACE ";" " " DOXYGEN_INPUT_LIST "${DOXYGEN_SOURCE_DIR}")
 	set(DOXYGEN_STRIP_FROM_PATH  "${DOXYGEN_INPUT_LIST}")
 	configure_file(${CMAKE_SOURCE_DIR}/cmake/doxygen.conf.in ${DOXYGEN_CONF})
 

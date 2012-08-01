@@ -194,6 +194,12 @@ void construct(context &c, platform p) {
 	c.queue = clCreateCommandQueue(c.native, c.device, 0, &status);
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't create CL queue");
+
+#if HAVE_AMD_FFT
+	status = clAmdFftSetup(nullptr);
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't set up FFT.");
+#endif
 }
 
 
@@ -209,7 +215,9 @@ context::context(platform p) {
 
 context::~context() {
 #if HAVE_AMD_FFT
-	//clAmdFftTeardown();
+	cl_uint status = clAmdFftTeardown();
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't tear down FFT.");
 #endif
 }
 
@@ -368,6 +376,12 @@ void kernel::arg(cl_uint i, buffer &buf) {
 
 
 #if HAVE_AMD_FFT
+fft::~fft() {
+	cl_uint status = clAmdFftDestroyPlan(&native);
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't destroy plan.");
+}
+
 fft_run fft::forward(buffer &in, buffer &out) {
 	return std::move( fft_run(*this, CLFFT_FORWARD, in, out) );
 }
@@ -384,11 +398,11 @@ void construct(fft &that, const context *ctx) {
 		that.dim,
 		that.lengths
 	);
-	status |= clAmdFftSetPlanPrecision(that.native, CLFFT_SINGLE);
-	status |= clAmdFftSetPlanScale(that.native, CLFFT_FORWARD, 1);
-	status |= clAmdFftSetPlanScale(that.native, CLFFT_BACKWARD, 1);
+	//status |= clAmdFftSetPlanPrecision(that.native, CLFFT_SINGLE);
+	//status |= clAmdFftSetPlanScale(that.native, CLFFT_FORWARD, 1);
+	//status |= clAmdFftSetPlanScale(that.native, CLFFT_BACKWARD, 1);
 	// stride x:1, y:len_x, z:len_x*len_y
-	status |= clAmdFftSetLayout(that.native, CLFFT_COMPLEX_INTERLEAVED, CLFFT_COMPLEX_INTERLEAVED);
+	//status |= clAmdFftSetLayout(that.native, CLFFT_COMPLEX_INTERLEAVED, CLFFT_COMPLEX_INTERLEAVED);
 	status |= clAmdFftSetResultLocation(that.native, CLFFT_OUTOFPLACE);
 
 	if(status != CL_SUCCESS) throw error(status, "Couldn't plan FFT.");

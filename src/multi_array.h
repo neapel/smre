@@ -7,7 +7,7 @@
 #include <boost/multi_array.hpp>
 
 namespace boost {
-	typedef multi_array_types::index_range index_range;
+	typedef multi_array_types::index_range range;
 }
 
 
