@@ -33,22 +33,19 @@ endif()
 # OpenCL libraries
 option(USE_OPENCL "Build with OpenCL kernels" ON)
 if(USE_OPENCL)
-	set(AMD_APP_SDK_ROOT "/opt/AMDAPP")
-	set(AMD_FFT_ROOT "${AMD_APP_SDK_ROOT}/fft")
-
 	find_package(OpenCL REQUIRED)
 	if(OpenCL_FOUND)
 		include_directories(${OpenCL_INCLUDE_DIRS})
 		require_libraries(${OpenCL_LIBRARIES})
 		set(HAVE_OPENCL ${OpenCL_FOUND})
+	endif()
 
-		# AMD FFT libraries
-		find_package(AmdFFT REQUIRED)
-		if(AmdFFT_FOUND)
-			include_directories(${AmdFFT_INCLUDE_DIRS})
-			require_libraries(${AmdFFT_LIBRARIES})
-			set(HAVE_AMD_FFT ${AmdFFT_FOUND})
-		endif()
+	# AMD FFT libraries
+	find_package(AmdFFT REQUIRED)
+	if(AmdFFT_FOUND)
+		include_directories(${AmdFFT_INCLUDE_DIRS})
+		require_libraries(${AmdFFT_LIBRARIES})
+		set(HAVE_AMD_FFT ${AmdFFT_FOUND})
 	endif()
 endif()
 
