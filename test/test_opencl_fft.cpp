@@ -96,7 +96,7 @@ float_a convolution_cl_naive(context &ctx, const float_a &in, const float_a &ker
 			b_kernel(sizeof(float) * kw * kh, stream_in);
 	
 	auto fold = ctx.compile(R"(
-		__kernel void fold(__global float *out, __constant float *in, __constant float *kern, const uint w, const uint h, const uint kw, const uint kh) {
+		__kernel void fold(__global float *out, __global float *in, __global float *kern, const uint w, const uint h, const uint kw, const uint kh) {
 			const uint x = get_global_id(0), y = get_global_id(1);
 			const uint dx = w - kw/2, dy = h - kh/2;
 			float sum = 0;
@@ -142,12 +142,8 @@ float_a convolution_cl_fft(context &ctx, const float_a &in, const float_a &kerne
 			.then()(plan.forward(b_in, b_temp)),
 		ctx(b_kernel_in << kernel)
 			.then()(plan.forward(b_kernel_in, b_kernel_out))
-	}.resume();
-	cerr << "or" << endl;
-	ctx(mult.args(b_temp, b_kernel_out).size({w*h})).then().resume();
-	cerr << "ro" << endl;
-
-	ctx(plan.backward(b_temp, b_out))
+	}(mult.args(b_temp, b_kernel_out).size({w*h}))
+		.then()(plan.backward(b_temp, b_out))
 		.then()(b_out >> out_c)
 		.then().resume();
 
@@ -195,7 +191,7 @@ int main(int argc, char **argv) {
 #if HAVE_OPENCL
 	context ctx;
 	cerr << "opencl naive" << endl;
-//	write_image(base + "-cl-naive.png", convolution_cl_naive(ctx, in, kernel));
+	write_image(base + "-cl-naive.png", convolution_cl_naive(ctx, in, kernel));
 
 #if HAVE_AMD_FFT
 	cerr << "opencl fft" << endl;
