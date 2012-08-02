@@ -26,7 +26,18 @@ int main(int, char**) {
 	buffer input_a(bs, stream_in), input_b(bs, stream_in), output(bs, stream_out);
 
 	// load kernel
-	auto prog = ctx.load("test_opencl_multi_array.cl");
+	auto prog = ctx.compile(R"(
+		kernel void add(
+			global float *input_a,
+			global float *input_b,
+			global float *output
+		) {
+			const uint x = get_global_id(0);
+			const uint y = get_global_id(1);
+			const uint i = x + y * get_global_size(0);
+			output[i] = input_a[i] + input_b[i];
+		}
+	)");
 
 	// queue input, calculation, output, wait.
 	after{

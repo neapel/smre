@@ -169,7 +169,7 @@ void construct(context &c, platform p) {
 	};
 	c.native = clCreateContextFromType(
 		context_props,
-		CL_DEVICE_TYPE_CPU,
+		CL_DEVICE_TYPE_ALL,
 		[](const char *error, const void *, size_t, void *) {
 			cerr << "OpenCL Error: " << error << endl;
 		},
@@ -312,9 +312,7 @@ cl::program::program(context *parent, string data) : parent(parent) {
 		native,
 		1,
 		devs,
-		nullptr,
-		//"-cl-no-signed-zeros -cl-finite-math-only -Werror"
-		//"-cl-std=CL1.1 -cl-kernel-arg-info",
+		"-Werror -cl-std=CL1.1",
 		nullptr,
 		nullptr
 	);

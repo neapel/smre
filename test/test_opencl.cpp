@@ -19,6 +19,7 @@ int main(int, char**) {
 
 	// create CL context
 	context ctx;
+	cerr << ctx << endl;
 
 	// create buffers
 	buffer input_a(stream_in),
@@ -26,8 +27,22 @@ int main(int, char**) {
 	       output(sizeof(float) * n, stream_out);
 
 	// load kernel
-	auto prog = ctx.load("test_opencl.cl");
-	auto multiply_add = prog["multiply_add"];
+	auto prog = ctx.compile(R"(
+		__kernel void f(
+			__global float *input_a,
+			const float mul_a,
+			__global float *input_b,
+			const float mul_b,
+			__global float *output
+		) {
+			uint tid = get_global_id(0);
+			output[tid] = input_a[tid] * mul_a + input_b[tid] * mul_b;
+		}
+	)");
+	cerr << prog << endl;
+
+	auto multiply_add = prog["f"];
+	cerr << multiply_add << endl;
 
 	// queue fill buffers
 	auto a_written = ctx( input_a << data_a );

@@ -96,7 +96,7 @@ float_a convolution_cl_naive(context &ctx, const float_a &in, const float_a &ker
 			b_kernel(sizeof(float) * kw * kh, stream_in);
 	
 	auto fold = ctx.compile(R"(
-		kernel void fold(global float *out, constant float *in, constant float *kern, uint w, uint h, uint kw, uint kh) {
+		__kernel void fold(__global float *out, __constant float *in, __constant float *kern, const uint w, const uint h, const uint kw, const uint kh) {
 			const uint x = get_global_id(0), y = get_global_id(1);
 			const uint dx = w - kw/2, dy = h - kh/2;
 			float sum = 0;
@@ -129,10 +129,8 @@ float_a convolution_cl_fft(context &ctx, const float_a &in, const float_a &kerne
 
 	fft plan(w, h);
 	auto mult = ctx.compile(R"(
-		kernel void multiply(global float2 *data, constant float2 *kern, uint w, uint h) {
-			const uint x = get_global_id(0);
-			const uint y = get_global_id(1);
-			const uint tid = x + y * w;
+		__kernel void multiply(__global float2 *data, __global float2 *kern) {
+			const uint tid = get_global_id(0);
 			const float dr = data[tid].x, di = data[tid].y, kr = kern[tid].x, ki = kern[tid].y;
 			data[tid].x = dr * kr - di * ki;
 			data[tid].y = dr * ki + di * kr;
@@ -144,8 +142,12 @@ float_a convolution_cl_fft(context &ctx, const float_a &in, const float_a &kerne
 			.then()(plan.forward(b_in, b_temp)),
 		ctx(b_kernel_in << kernel)
 			.then()(plan.forward(b_kernel_in, b_kernel_out))
-	}(mult.args(b_temp, b_kernel_out, w, h).size({w,h}))
-		.then()(plan.backward(b_temp, b_out))
+	}.resume();
+	cerr << "or" << endl;
+	ctx(mult.args(b_temp, b_kernel_out).size({w*h})).then().resume();
+	cerr << "ro" << endl;
+
+	ctx(plan.backward(b_temp, b_out))
 		.then()(b_out >> out_c)
 		.then().resume();
 
@@ -185,13 +187,15 @@ int main(int argc, char **argv) {
 	cerr << "cpu fft" << endl;
 	write_image(base + "-cpu-fft.png", convolution_cpu_fft(in, kernel));
 
+#if 0
 	cerr << "cpu naive" << endl;
 	write_image(base + "-cpu-naive.png", convolution_cpu_naive(in, kernel));
+#endif
 
 #if HAVE_OPENCL
 	context ctx;
 	cerr << "opencl naive" << endl;
-	write_image(base + "-cl-naive.png", convolution_cl_naive(ctx, in, kernel));
+//	write_image(base + "-cl-naive.png", convolution_cl_naive(ctx, in, kernel));
 
 #if HAVE_AMD_FFT
 	cerr << "opencl fft" << endl;
