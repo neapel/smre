@@ -6,10 +6,10 @@ set(BASE_SRC
 		plain_io.cpp
 		gil_io.cpp
 	opencl_helpers.cpp
+	chambolle_pock.cpp
 )
 
 add_library(smre SHARED ${BASE_SRC})
-#target_link_libraries(smre ${CMAKE_REQUIRED_LIBRARIES})
 require_libraries(smre)
 
 
