@@ -38,7 +38,7 @@ float_a from_complex(cfloat_a in) {
 }
 
 template<class T>
-multi_array<T, 2> pad(const multi_array<T, 2> &in, size_t *shape) {
+multi_array<T, 2> pad(const multi_array<T, 2> &in, const size_t *shape) {
 	multi_array<T, 2> out(extents[shape[1]][shape[0]]);
 	kernel_pad(in, out);
 	return out;

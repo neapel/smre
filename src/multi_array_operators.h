@@ -1,6 +1,7 @@
 #ifndef __MULTI_ARRAY_OPERATORS_H__
 #define __MULTI_ARRAY_OPERATORS_H__
 
+#include "multi_array_iterator.h"
 #include "mimas/multi_array_op.h"
 #include <complex>
 
@@ -8,6 +9,38 @@
 template<class I, class A>
 void iota(A &a, I x = I()) {
 	mimas::multi_apply(a, [&x](typename A::element &e){ e = x++; });
+}
+
+
+/** Fills an array with a value */
+template<class A>
+void fill(A &a, typename A::element x) {
+	mimas::multi_apply(a, [x](typename A::element &e){ e = x; });
+}
+
+
+/** Returns the minimum value from the array */
+template<class A>
+typename A::element min(const A &a) {
+	typename A::element x = a[0][0];
+	mimas::multi_apply(const_cast<A&>(a), [&x](const typename A::element &e){ if(e < x) x = e; });
+	return x;
+}
+
+/** Returns the maximum value from the array */
+template<class A>
+typename A::element max(const A &a) {
+	typename A::element x = a[0][0];
+	mimas::multi_apply(const_cast<A&>(a), [&x](const typename A::element &e){ if(e > x) x = e; });
+	return x;
+}
+
+/** Returns the sum of all elements of the array */
+template<class A>
+typename A::element sum(const A &a) {
+	typename A::element x = 0;
+	mimas::multi_apply(const_cast<A&>(a), [&x](const typename A::element &e){ x += e; });
+	return x;
 }
 
 
@@ -45,11 +78,12 @@ namespace std {
 /** Return conjugated transposed array. */
 template<class T>
 boost::multi_array<T, 2> conjugate_transpose(const boost::multi_array<T, 2> &in) {
-	size_t w = a.shape()[0], h = a.shape()[1];
-	boost::multi_array<T, 2> out(extents[w][h]);
+	size_t w = in.shape()[0], h = in.shape()[1];
+	boost::multi_array<T, 2> out(boost::extents[w][h]);
 	for(size_t x = 0 ; x < w ; x++)
 		for(size_t y = 0 ; y < h ; y++)
 			out[x][y] = std::conj(in[y][x]);
+	return out;
 }
 
 

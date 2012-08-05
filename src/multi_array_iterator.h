@@ -41,6 +41,8 @@ public:
 	element_iterator(A &a) : base(a), i(0) {}
 	element_iterator(const self_type &o) : base(o.base), i(o.i) {}
 
+	void operator=(const self_type &o) { base = o.base; i = o.i; }
+
 	typename A::element &dereference() const {
 		return base(internal::index_to_array(base, i));
 	}

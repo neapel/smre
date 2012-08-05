@@ -4,6 +4,7 @@
 #include "multi_array_operators.h"
 #include "multi_array_iterator.h"
 #include "multi_array_fft.h"
+#include "multi_array_print.h"
 
 #include <boost/multi_array.hpp>
 #include <array>

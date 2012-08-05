@@ -49,3 +49,5 @@ if(HAVE_OPENCL)
 	tiny_test(test_opencl_multi_array)
 	tiny_test(test_opencl_fft)
 endif()
+
+tiny_test(test_chambolle_pock)
