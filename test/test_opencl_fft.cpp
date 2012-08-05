@@ -80,7 +80,7 @@ float_a convolution_cpu_fft(const float_a &in, const float_a &kernel_small) {
 	return out;
 }
 
-
+#if HAVE_OPENCL
 /** Naive convolution of real data on the CL device. */
 float_a convolution_cl_naive(context &ctx, const float_a &in, const float_a &kernel) {
 	const unsigned int h = in.shape()[1], w = in.shape()[0], kh = kernel.shape()[1], kw = kernel.shape()[0];
@@ -110,7 +110,7 @@ float_a convolution_cl_naive(context &ctx, const float_a &in, const float_a &ker
 	return out;
 }
 
-
+#if HAVE_AMD_FFT
 /** Convolve by computing (on the CL device) R2C FFTs of data and kernel, return C2R FFT of product. */
 float_a convolution_cl_fft(context &ctx, const float_a &in, const float_a &kernel_small) {
 	auto kernel = pad(to_complex(kernel_small), in.shape());
@@ -143,6 +143,8 @@ float_a convolution_cl_fft(context &ctx, const float_a &in, const float_a &kerne
 
 	return from_complex(out_c);
 }
+#endif
+#endif
 
 
 

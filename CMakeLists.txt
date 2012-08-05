@@ -7,8 +7,8 @@ include_directories(
 	"src"
 )
 
-macro(require_libraries LIBS)
-	list(APPEND CMAKE_REQUIRED_LIBRARIES ${LIBS})
+macro(require_libraries)
+	list(APPEND CMAKE_REQUIRED_LIBRARIES ${ARGN})
 endmacro()
 
 
@@ -65,7 +65,7 @@ endif()
 
 # Boost libraries
 find_package(Boost
-	COMPONENTS program_options
+	COMPONENTS program_options regex
 	REQUIRED)
 if(Boost_FOUND)
 	include_directories(${Boost_INCLUDE_DIRS})
