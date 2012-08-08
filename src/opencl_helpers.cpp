@@ -199,12 +199,34 @@ void construct(context &c, platform p) {
 	status = clAmdFftSetup(nullptr);
 	if(status != CL_SUCCESS)
 		throw error(status, "Couldn't set up FFT.");
+
+	// Test it:
+	clAmdFftPlanHandle test_plan;
+	size_t lengths[] = {1024, 1024};
+	status = clAmdFftCreateDefaultPlan(&test_plan, c.native, CLFFT_2D, lengths);
+	if(status != CL_SUCCESS) {
+		cl_uint status2 = clAmdFftTeardown();
+		if(status2 != CL_SUCCESS)
+			throw error(status2, "Couldn't tear down FFT after test failure.");
+		throw error(status, "Couldn't create test plan.");
+	}
+	status = clAmdFftDestroyPlan(&test_plan);
+	if(status != CL_SUCCESS)
+		throw error(status, "Couldn't destroy test plan.");
 #endif
 }
 
 
 context::context() {
-	construct(*this, all_platforms().front());
+	for(auto p : all_platforms()) {
+		try {
+			construct(*this, p);
+			return;
+		} catch(error &e) {
+			cerr << "Couldn't initialize platform: " << e.what() << endl;
+		}
+	}
+	throw error(CL_INVALID_PLATFORM, "Couldn't initialize any platform.");
 }
 
 
@@ -312,7 +334,7 @@ cl::program::program(context *parent, string data) : parent(parent) {
 		native,
 		1,
 		devs,
-		"-Werror -cl-std=CL1.1",
+		"-Werror -cl-std=CL1.0",
 		nullptr,
 		nullptr
 	);
