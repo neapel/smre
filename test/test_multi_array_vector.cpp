@@ -58,7 +58,7 @@ int main(int, char**) {
 	{
 		multi_array<double, 2> multi(extents[4][9]);
 		iota(multi, 1);
-		auto v = multi[indices[2][boost::range(1, 7, 2)]];
+		auto v = multi[indices[2][boost::irange(1, 7, 2)]];
 		assert(multi_equal(v, {20, 22, 24}));
 
 		auto u = make_vector(v);

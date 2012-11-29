@@ -2,7 +2,7 @@
 #define __OPENCL_MULTI_ARRAY_H__
 
 #include "opencl_helpers.h"
-
+#include "multi_array_operators.h"
 
 namespace cl {
 

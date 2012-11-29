@@ -47,7 +47,7 @@ int main(int, char**) {
 
 		{
 			// modifying view modifies original:
-			auto b = B[ indices[boost::range(0, 3)][1][boost::range(0,5,2)] ];
+			auto b = B[ indices[boost::irange(0, 3)][1][boost::irange(0,5,2)] ];
 			assert(b[0][1] == 7);
 			auto m = make_matrix(b);
 			assert(m(0, 1) == 7);
@@ -71,7 +71,7 @@ int main(int, char**) {
 		assert(m(1, 1) == 999);
 
 		// shift origin after matrix creation:
-		D.reindex(std::array<size_t, 2>{{-1, 0}});
+		D.reindex(std::array<int, 2>{{-1, 0}});
 		assert(D[0][1] == 999);
 		// matrix doesn't support origin shift, always at 0, 0:
 		assert(m(1, 1) == 999);

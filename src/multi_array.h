@@ -11,7 +11,7 @@
 #include <algorithm>
 
 namespace boost {
-	typedef multi_array_types::index_range range;
+	typedef multi_array_types::index_range irange;
 
 	template<class A>
 	std::array<size_t, A::dimensionality> extents_of(const A &a) {

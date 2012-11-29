@@ -133,6 +133,7 @@ int main(int argc, char **argv) {
 		multi_array<float, 2> xn = x;
 		normalize(xn);
 		write_image(output_prefix + name + ".png", xn);
+
 	});
 
 	return EXIT_SUCCESS;
