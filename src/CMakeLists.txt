@@ -16,3 +16,8 @@ require_libraries(smre)
 # Executables using that library
 add_executable(main  main.cpp)
 target_link_libraries(main ${CMAKE_REQUIRED_LIBRARIES})
+
+add_executable(guimain  guimain.cpp)
+target_link_libraries(guimain ${CMAKE_REQUIRED_LIBRARIES})
+file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/gui.glade")
+file(COPY gui.glade DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")

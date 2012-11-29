@@ -99,6 +99,17 @@ if(USE_GIL)
 	set(HAVE_GIL  ${HAVE_JPEG} | ${HAVE_PNG} | ${HAVE_TIFF})
 endif()
 
+# GTK+3 GUI
+option(WITH_GUI "Build with GTK+ GUI" ON)
+if(WITH_GUI)
+	find_package(PkgConfig REQUIRED)
+	pkg_check_modules(GTKMM REQUIRED gtkmm-3.0)
+	include_directories(${GTKMM_INCLUDE_DIRS})
+	link_directories(${GTKMM_LIBRARY_DIRS})
+	require_libraries(${GTKMM_LIBRARIES})
+	add_definitions(${GTKMM_CFLAGS_OTHER})
+endif()
+
 
 # Compiler specifics
 include(CheckCXXCompilerFlag)

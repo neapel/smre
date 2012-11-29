@@ -14,4 +14,6 @@
 #cmakedefine HAVE_TIFF 1
 #cmakedefine HAVE_GIL 1
 
+#define GTK_RESOURCE_PATH "${CMAKE_CURRENT_BINARY_DIR}/src/"
+
 #endif
