@@ -36,7 +36,7 @@ struct constraint_options {
 };
 
 void validate(any &v, const vector<string> &values, constraint_options *, int) {
-	static regex r("(gauss:(?<gauss>\\d+\\.?\\d*)|box:(?<box>\\d+))(,(?<a>\\d*\\.?\\d*),(?<b>\\d*\\.?\\d*))?");
+	static regex r("(gauss:(?<gauss>\\d+\\.?\\d*)|box:(?<box>\\d+))(,(?<a>-?\\d*\\.?\\d*),(?<b>\\d*\\.?\\d*))?");
 	validators::check_first_occurrence(v);
 	const string &s = validators::get_single_string(values);
 	smatch m;
@@ -54,7 +54,7 @@ void validate(any &v, const vector<string> &values, constraint_options *, int) {
 			const auto size = lexical_cast<size_t>(m["box"]);
 			v = any(constraint_options{a, b, [=](size_t, size_t) {
 				multi_array<float, 2> k(extents[size][size]);
-				fill(k, 1 / (1.0 * size * size));
+				fill(k, 1 / sqrt(1.0 * size * size));
 				return k;
 			}});
 		}
@@ -105,13 +105,27 @@ int main(int argc, char **argv) {
 	x *= 2.0f;
 	x -= 1.0f;
 
-	// constraints
+	// constraints and their norms
 	vector<constraint> constraints;
-	for(auto c : pre_constraints)
+	const auto size = extents_of(x);
+	multi_array<complex<float>, 2> padded_kernel(size), kernel_fft(size);
+	double constr_norm2 = 0;
+	int i = 0;
+	for(auto c : pre_constraints){
 		constraints.push_back(constraint{c.a, c.b, x, c.create(w, h)});
+		kernel_pad(constraints[i].k, padded_kernel);
+		fftw::forward(padded_kernel, kernel_fft)();
+		i += 1;
+		double local_constr = 0;
+		for(size_t iy = 0 ; iy < size[0] ; iy++)
+			for(size_t ix = 0 ; ix < size[1] ; ix++)
+				local_constr = max(pow(real(kernel_fft[ix][iy]),2) + pow(imag(kernel_fft[ix][iy]),2), local_constr);
 
+		constr_norm2 += local_constr;
+	}
+	cerr << "Norm of constraints=" << constr_norm2 << endl;
 	// run
-	const float sigma = 1.0f / tau;
+	const float sigma = 1.0f / (tau * constr_norm2);
 	const float gamma = 1.0f;
 
 	chambolle_pock(tau, sigma, gamma, x, constraints, [=](const multi_array<float, 2> &x, string name){

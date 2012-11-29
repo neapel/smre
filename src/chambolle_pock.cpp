@@ -95,7 +95,7 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 		tau *= theta;
 		sigma /= theta;
 
-		cerr << "tau=" << tau << " sigma=" << sigma << " theta=" << theta << endl;
+		cerr << "tau=" << tau << " sigma=" << sigma << " theta=" << theta << " tau*n=" << tau*n << endl;
 
 		// new bar_x
 		for(size_t iy = 0 ; iy < height ; iy++)
