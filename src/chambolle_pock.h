@@ -36,6 +36,6 @@ struct constraint {
  * 		\bar x^{n + 1} &= x^{n + 1} + \theta_n (x^{n + 1} - x^n)
  * 	\f}
  */
-boost::multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, boost::multi_array<float, 2> &x, std::vector<constraint>, std::function<void(const boost::multi_array<float, 2> &, std::string)> debug);
+boost::multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, boost::multi_array<float, 2> &x, std::vector<constraint> &, std::function<void(const boost::multi_array<float, 2> &, std::string)> debug);
 
 #endif

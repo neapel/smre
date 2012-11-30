@@ -10,6 +10,7 @@ class file_reader {
 public:
 	/*! Open the file for reading */
 	// file_reader(std::string filename);
+	virtual ~file_reader() {}
 
 	/*! Close the file */
 	virtual void close() = 0;
@@ -27,6 +28,7 @@ class file_writer {
 public:
 	/*! Open the file for writing */
 	// file_writer(std::string filename);
+	virtual ~file_writer() {}
 
 	/*! Close the file */
 	virtual void close() = 0;

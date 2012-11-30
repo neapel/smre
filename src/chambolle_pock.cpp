@@ -12,7 +12,7 @@ inline float clamp(float x, float low, float high) {
 	return x;
 }
 
-multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_array<float, 2> &x, vector<constraint> cons, function<void(const multi_array<float, 2> &, string)> debug) {
+multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_array<float, 2> &x, vector<constraint> &cons, function<void(const multi_array<float, 2> &, string)> debug) {
 	assert(sigma > 0);
 
 	const size_t N = cons.size();
@@ -23,7 +23,7 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 	const auto c_size = extents[c_height][c_width];
 
 	// fftw scale factor
-	const float scale = 1.0f / (width * height);
+	const float scale = 1 / sqrt(width * height);
 
 	// arrays
 	multi_array<float, 2> bar_x = x, w(size), convolved(size), dx(size), Y = x, padded_kernel(size);
@@ -32,6 +32,9 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 	// Preprocess the kernels, i.e. pad and apply fourier transform.
 	multi_array<complex<float>, 2> fft_k[N], fft_conj_k[N];
 	for(size_t i = 0 ; i < N ; i++) {
+		// normalize kernel to sum=1
+		cons[i].k /= sum(cons[i].k);
+
 		// Pad and transform kernel
 		fft_k[i].resize(c_size);
 		kernel_pad(cons[i].k, padded_kernel);
@@ -59,6 +62,7 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 				for(size_t ix = 0 ; ix < c_width ; ix++)
 					fft_conv[iy][ix] = fft_k[i][iy][ix] * fft_bar_x[iy][ix] * scale;
 			fftw::backward(fft_conv, convolved)();
+			convolved *= scale;
 			debug(convolved, str(format("%d-%d-conv") % n % i));
 
 			// calculate new y_i
@@ -74,6 +78,7 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 				for(size_t ix = 0 ; ix < c_width ; ix++)
 					fft_conv[iy][ix] *= fft_conj_k[i][iy][ix] * scale;
 			fftw::backward(fft_conv, convolved)();
+			convolved *= scale;
 
 			// accumulate
 			w += convolved;
