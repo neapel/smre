@@ -30,33 +30,45 @@ multi_array<float, 2> gauss(size_t w, size_t h, float sigma) {
 	return out;
 }
 
-struct constraint_options {
-	float a, b;
-	std::function<multi_array<float, 2>(size_t, size_t)> create;
-};
+typedef std::function<constraint(const multi_array<float, 2> &x)> pre_constraint;
 
-void validate(any &v, const vector<string> &values, constraint_options *, int) {
-	static regex r("(gauss:(?<gauss>\\d+\\.?\\d*)|box:(?<box>\\d+))(,(?<a>-?\\d*\\.?\\d*),(?<b>\\d*\\.?\\d*))?");
+// parse the constraints from command line.
+// return a function to create the constraint, once we know the image size.
+void validate(any &v, const vector<string> &values, pre_constraint *, int) {
+	// kernels: (("gauss:" sigma) OR ("box:" size) OR filename) "," a "," b
+	static regex r("(gauss:(?<gauss>\\d+\\.?\\d*)|box:(?<box>\\d+)|(?<file>[^,]+))"
+	               "(,(?<a>-?\\d*\\.?\\d*)"
+						 ",(?<b>-?\\d*\\.?\\d*))?");
 	validators::check_first_occurrence(v);
 	const string &s = validators::get_single_string(values);
 	smatch m;
 	if(regex_match(s, m, r)) {
+		// limits
 		const float a = m["a"].matched ? lexical_cast<float>(m["a"]) : -1;
 		const float b = m["b"].matched ? lexical_cast<float>(m["b"]) :  1;
+		// don't normalize values here, we do that at the start of the algorithm.
 		if(m["gauss"].matched) {
+			// a gaussian distribution which stretches the whole size of the input image
 			const auto sigma = lexical_cast<float>(m["gauss"]);
-			v = any(constraint_options{a, b, [=](size_t w, size_t h) {
+			v = any(pre_constraint([=](const multi_array<float, 2> &x){
+				const size_t w = x.shape()[0], h = x.shape()[1];
 				auto k = gauss(w, h, sigma);
-				k /= sum(k);
-				return k;
-			}});
+				return constraint{a, b, x, k};
+			}));
 		} else if(m["box"].matched) {
+			// a box of the given size with equal distribution
 			const auto size = lexical_cast<size_t>(m["box"]);
-			v = any(constraint_options{a, b, [=](size_t, size_t) {
+			v = any(pre_constraint([=](const multi_array<float, 2> &x){
 				multi_array<float, 2> k(extents[size][size]);
-				fill(k, 1 / sqrt(1.0 * size * size));
-				return k;
-			}});
+				fill(k, 1);
+				return constraint{a, b, x, k};
+			}));
+		} else if(m["file"].matched) {
+			// load kernel from file
+			const auto kernel = read_image(m["file"]);
+			v = any(pre_constraint([=](const multi_array<float, 2> &x){
+				return constraint{a, b, x, kernel};
+			}));
 		}
 	} else {
 		throw validation_error(validation_error::invalid_option_value);
@@ -65,12 +77,11 @@ void validate(any &v, const vector<string> &values, constraint_options *, int) {
 
 
 int main(int argc, char **argv) {
-
+	// Handle command line options.
 	string input_file;
 	string output_prefix = "";
 	float tau;
-	vector<constraint_options> pre_constraints;
-
+	vector<pre_constraint> pre_constraints;
 	{
 		options_description desc("Options");
 		desc.add_options()
@@ -101,39 +112,39 @@ int main(int argc, char **argv) {
 
 	// read input
 	auto x = read_image(input_file);
-	const size_t w = x.shape()[0], h = x.shape()[1];
+	const size_t h = x.shape()[0], w = x.shape()[1];
+	const auto size = extents[h][w];
+	// x values in [-1 : 1]
 	x *= 2.0f;
 	x -= 1.0f;
 
-	// constraints and their norms
+	// create actual constraints
 	vector<constraint> constraints;
-	const auto size = extents_of(x);
-	multi_array<complex<float>, 2> padded_kernel(size), kernel_fft(size);
-	double constr_norm2 = 0;
-	int i = 0;
-	for(auto c : pre_constraints){
-		constraints.push_back(constraint{c.a, c.b, x, c.create(w, h)});
-		kernel_pad(constraints[i].k, padded_kernel);
-		fftw::forward(padded_kernel, kernel_fft)();
-		i += 1;
-		double local_constr = 0;
-		for(size_t iy = 0 ; iy < size[0] ; iy++)
-			for(size_t ix = 0 ; ix < size[1] ; ix++)
-				local_constr = max(pow(real(kernel_fft[ix][iy]),2) + pow(imag(kernel_fft[ix][iy]),2), local_constr);
+	for(auto c : pre_constraints)
+		constraints.push_back(c(x));
 
-		constr_norm2 += local_constr;
+	// calculate their fft's norm
+	multi_array<complex<float>, 2> kernel_fft(size);
+	double constraints_norm2 = 0;
+	for(auto c : constraints) {
+		kernel_pad(c.k, kernel_fft);
+		fftw::forward(kernel_fft, kernel_fft)();
+		double local_norm2 = 0;
+		for(auto row : kernel_fft)
+			for(auto value : row)
+				local_norm2 = max(pow(real(value), 2) + pow(imag(value), 2), local_norm2);
+		constraints_norm2 += local_norm2;
 	}
-	cerr << "Norm of constraints=" << constr_norm2 << endl;
-	// run
-	const float sigma = 1.0f / (tau * constr_norm2);
-	const float gamma = 1.0f;
+	cerr << "Norm of constraints=" << constraints_norm2 << endl;
+
+	const float sigma = 1 / (tau * constraints_norm2);
+	const float gamma = 1;
 
 	chambolle_pock(tau, sigma, gamma, x, constraints, [=](const multi_array<float, 2> &x, string name){
 		cerr << name;
 		multi_array<float, 2> xn = x;
 		normalize(xn);
 		write_image(output_prefix + name + ".png", xn);
-
 	});
 
 	return EXIT_SUCCESS;
