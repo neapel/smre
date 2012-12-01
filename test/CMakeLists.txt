@@ -51,3 +51,4 @@ if(HAVE_OPENCL)
 endif()
 
 tiny_test(test_chambolle_pock)
+tiny_test(test_kernel_generator)
