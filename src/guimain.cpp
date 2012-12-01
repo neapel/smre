@@ -60,6 +60,8 @@ struct main_window : Gtk::Window {
 	SpinButton max_steps_value{Adjustment::create(10, 1, 100)};
 	Statusbar statusbar;
 	ProgressBar progress;
+	Notebook notebook;
+	Image original_image, output_image;
 
 	struct cc : TreeModel::ColumnRecord {
 		TreeModelColumn<float> a, b;
@@ -167,8 +169,17 @@ struct main_window : Gtk::Window {
 		constraints_view.append_column_numeric_editable("b", constraints_columns.b, "%.2f");
 
 		// Output
+		paned->pack2(notebook);
+		// Scroll-locked image views for comparison
+		auto original_scroll = manage(new ScrolledWindow());
+		original_scroll->add(original_image);
+		notebook.append_page(*original_scroll, "Input");
+		auto output_scroll = manage(new ScrolledWindow(original_scroll->get_hadjustment(), original_scroll->get_vadjustment()));
+		output_scroll->add(output_image);
+		notebook.append_page(*output_scroll, "Output");
+		// Debug details
 		auto scrolled_window = manage(new ScrolledWindow());
-		paned->pack2(*scrolled_window);
+		notebook.append_page(*scrolled_window, "Debug");
 		scrolled_window->add(steps_view);
 		steps_view.set_grid_lines(TREE_VIEW_GRID_LINES_VERTICAL);
 		steps_view.append_column("Description", steps_columns.name);
@@ -185,7 +196,7 @@ struct main_window : Gtk::Window {
 
 		constraints_menu.show_all();
 		show_all_children();
-		set_size_request(800, 600);
+		//set_size_request(800, 600);
 
 		progress.hide();
 
@@ -213,17 +224,23 @@ struct main_window : Gtk::Window {
 			auto row = *steps_model->append();
 			row[steps_columns.img] = input_image;
 			row[steps_columns.name] = "Input";
+			original_image.set(input_image);
+			output_image.set(input_image);
 			run->set_sensitive(true);
 		}
 	}
 
 	// Run the algorithm in a new thread.
 	void do_run() {
-		// detach model for modification in thread
-		steps_view.unset_model();
-		progress.show();
 		// start thread
 		Threads::Thread::create([&]{
+			// Debug mode?
+			const auto debug = notebook.get_current_page() == 2;
+			progress.set_fraction(0);
+			progress.show();
+			// detach model for modification in thread
+			if(debug) steps_view.unset_model();
+
 			// The image to process
 			auto input = pixbuf_to_multi_array(input_image);
 			const auto h = input.shape()[0], w = input.shape()[1];
@@ -244,13 +261,14 @@ struct main_window : Gtk::Window {
 			const float gamma = gamma_value.get_value();
 			const int max_steps = max_steps_value.get_value_as_int();
 
-			steps_model->clear();
-			auto input_row = *steps_model->append();
-			input_row[steps_columns.img] = input_image;
-			input_row[steps_columns.name] = "Input";
-
-			TreeModel::iterator step_row;
+			TreeModel::iterator input_row, step_row;
 			int previous_step = -1;
+			if(debug) {
+				steps_model->clear();
+				step_row = input_row = steps_model->append();
+				(*input_row)[steps_columns.img] = input_image;
+				(*input_row)[steps_columns.name] = "Input";
+			}
 			
 			// run
 			auto result = chambolle_pock(
@@ -258,23 +276,26 @@ struct main_window : Gtk::Window {
 				tau, sigma, gamma,
 				input, constraints,
 				[&](const boost::multi_array<float, 2> &x, string name, int n, int i, float tau, float sigma, float theta){
-					if(n != previous_step) {
-						previous_step = n;
-						step_row = steps_model->append(input_row.children());
-						(*step_row)[steps_columns.name] = "Step";
-						(*step_row)[steps_columns.n] = boost::lexical_cast<string>(n);
+					if(debug) {
+						if(n != previous_step) {
+							previous_step = n;
+							step_row = steps_model->append(input_row->children());
+							(*step_row)[steps_columns.name] = "Step";
+							(*step_row)[steps_columns.n] = boost::lexical_cast<string>(n);
+						}
+						auto row = *steps_model->append(step_row->children());
+						row[steps_columns.img] = multi_array_to_pixbuf(x);
+						row[steps_columns.name] = name;
+						row[steps_columns.n] = boost::lexical_cast<string>(n);
+						if(i >= 0) row[steps_columns.i] = boost::lexical_cast<string>(i);
+						if(tau != -1) row[steps_columns.tau] = boost::lexical_cast<string>(tau);
+						if(sigma != -1) row[steps_columns.sigma] = boost::lexical_cast<string>(sigma);
+						if(theta != -1) row[steps_columns.theta] = boost::lexical_cast<string>(theta);
 					}
-					auto row = *steps_model->append(step_row->children());
-					row[steps_columns.img] = multi_array_to_pixbuf(x);
-					row[steps_columns.name] = name;
-					row[steps_columns.n] = boost::lexical_cast<string>(n);
-					if(i >= 0) row[steps_columns.i] = boost::lexical_cast<string>(i);
-					if(tau != -1) row[steps_columns.tau] = boost::lexical_cast<string>(tau);
-					if(sigma != -1) row[steps_columns.sigma] = boost::lexical_cast<string>(sigma);
-					if(theta != -1) row[steps_columns.theta] = boost::lexical_cast<string>(theta);
 					progress.set_fraction(1.0 * n / max_steps);
 				}
 			);
+			output_image.set(multi_array_to_pixbuf(result));
 			algorithm_done();
 		});
 	}
