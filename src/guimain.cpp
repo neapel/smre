@@ -66,19 +66,15 @@ struct labeled_image : VBox {
 	: labeled_image(multi_array_to_pixbuf(img), text) {}
 };
 
-struct constraints_columns_t : TreeModel::ColumnRecord {
-	TreeModelColumn<float> a;
-	TreeModelColumn<float> b;
-	TreeModelColumn<string> kernel;
-	constraints_columns_t() {
-		add(a); add(b); add(kernel);
-	}
-};
 
 struct main_window : Gtk::Window {
 	Entry tau_value;
 
-	constraints_columns_t constraints_columns;
+	struct cols : TreeModel::ColumnRecord {
+		TreeModelColumn<float> a, b;
+		TreeModelColumn<string> kernel;
+		cols() { add(a); add(b); add(kernel); }
+	} constraints_columns;
 	RefPtr<ListStore> constraints_model;
 	TreeView constraints_view;
 
