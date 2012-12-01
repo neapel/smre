@@ -1,6 +1,5 @@
 #include "chambolle_pock.h"
 #include "multi_array_fft.h"
-#include <boost/format.hpp>
 
 using namespace std;
 using namespace mimas;
@@ -12,7 +11,7 @@ inline float clamp(float x, float low, float high) {
 	return x;
 }
 
-multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_array<float, 2> &x, vector<constraint> &cons, function<void(const multi_array<float, 2> &, string)> debug) {
+multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, float gamma, multi_array<float, 2> &x, vector<constraint> &cons, debug_f debug) {
 	assert(sigma > 0);
 
 	const size_t N = cons.size();
@@ -48,7 +47,7 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 	}
 
 	// Repeat until good enough.
-	for(size_t n = 0 ; n < 10 ; n++) {
+	for(size_t n = 0 ; n < max_steps ; n++) {
 		// reset accumulator
 		fill(w, 0);
 
@@ -63,14 +62,14 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 					fft_conv[iy][ix] = fft_k[i][iy][ix] * fft_bar_x[iy][ix] * scale;
 			fftw::backward(fft_conv, convolved)();
 			convolved *= scale;
-			debug(convolved, str(format("%d-%d-conv") % n % i));
+			debug(convolved, "convolved", n, i, tau, sigma, -1);
 
 			// calculate new y_i
 			for(size_t iy = 0 ; iy < height ; iy++)
 				for(size_t ix = 0 ; ix < width ; ix++)
 					cons[i].y[iy][ix] = (cons[i].y[iy][ix] + sigma * convolved[iy][ix])
 					 - sigma * clamp(cons[i].y[iy][ix] / sigma + convolved[iy][ix], cons[i].a, cons[i].b);
-			debug(cons[i].y, str(format("%d-%d-y") % n % i));
+			debug(cons[i].y, "y", n, i, tau, sigma, -1);
 
 			// convolve y_i with conjugate transpose of kernel
 			fftw::forward(cons[i].y, fft_conv)();
@@ -83,8 +82,7 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 			// accumulate
 			w += convolved;
 		}
-		//w /= float(N); // seems to prevent explosions?
-		debug(w, str(format("%d-w") % n));
+		debug(w, "w", n, -1, tau, sigma, -1);
 
 		auto old_x = x;
 
@@ -92,7 +90,7 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 		for(size_t iy = 0 ; iy < height ; iy++)
 			for(size_t ix = 0 ; ix < width ; ix++)
 				x[iy][ix] = (x[iy][ix] - tau * w[iy][ix] + tau * Y[iy][ix]) / (1 + tau);
-		debug(x, str(format("%d-x") % n));
+		debug(x, "x", n, -1, tau, sigma, -1);
 
 		// theta
 		const float theta = 1 / sqrt(1 + 2 * tau * gamma);
@@ -100,13 +98,11 @@ multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, multi_
 		tau *= theta;
 		sigma /= theta;
 
-		cerr << "tau=" << tau << " sigma=" << sigma << " theta=" << theta << " tau*n=" << tau*n << endl;
-
 		// new bar_x
 		for(size_t iy = 0 ; iy < height ; iy++)
 			for(size_t ix = 0 ; ix < width ; ix++)
 				bar_x[iy][ix] = x[iy][ix] + theta * (x[iy][ix] - old_x[iy][ix]);
-		debug(bar_x, str(format("%d-barx") % n));
+		debug(bar_x, "x̄", n, -1, tau, sigma, theta);
 	}
 
 	return bar_x;

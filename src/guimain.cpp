@@ -52,33 +52,32 @@ RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 	return pb;
 }
 
-struct labeled_image : VBox {
-	Image image;
-	Label label;
-	labeled_image(RefPtr<Pixbuf> img, string text)
-	: image(img), label(text) {
-		pack_start(image, PACK_SHRINK);
-		pack_start(label, PACK_SHRINK);
-		show_all_children();
-		show();
-	}
-	labeled_image(const boost::multi_array<float,2> &img, string text)
-	: labeled_image(multi_array_to_pixbuf(img), text) {}
-};
-
 
 struct main_window : Gtk::Window {
 	Entry tau_value;
+	SpinButton gamma_value{Adjustment::create(1, -5, 5), 0, 2};
+	SpinButton sigma_value{Adjustment::create(1, 0, 5), 0, 2};
+	SpinButton max_steps_value{Adjustment::create(10, 1, 100)};
+	Statusbar statusbar;
+	ProgressBar progress;
 
-	struct cols : TreeModel::ColumnRecord {
+	struct cc : TreeModel::ColumnRecord {
 		TreeModelColumn<float> a, b;
 		TreeModelColumn<string> kernel;
-		cols() { add(a); add(b); add(kernel); }
+		cc() { add(a); add(b); add(kernel); }
 	} constraints_columns;
 	RefPtr<ListStore> constraints_model;
 	TreeView constraints_view;
 
-	HBox images;
+	struct cs : TreeModel::ColumnRecord {
+		TreeModelColumn<RefPtr<Pixbuf>> img;
+		TreeModelColumn<string> name;
+		TreeModelColumn<string> n, i;
+		TreeModelColumn<string> tau, sigma, theta;
+		cs() { add(img); add(name); add(n); add(i); add(tau); add(sigma); add(theta); }
+	} steps_columns;
+	RefPtr<TreeStore> steps_model;
+	TreeView steps_view;
 
 	Menu constraints_menu;
 	RefPtr<Action> add_constraint{Action::create("add_constraint", Stock::ADD, "_Add Constraint")};
@@ -89,11 +88,12 @@ struct main_window : Gtk::Window {
 
 	Dispatcher algorithm_done;
 	RefPtr<Pixbuf> input_image;
-	vector<shared_ptr<labeled_image>> output_images;
 
 	main_window()
 	: constraints_model{ListStore::create(constraints_columns)},
-	  constraints_view{constraints_model}
+	  constraints_view{constraints_model},
+	  steps_model{TreeStore::create(steps_columns)},
+	  steps_view{steps_model}
 	{
 		// Main layout
 		auto vbox = manage(new VBox());
@@ -125,6 +125,16 @@ struct main_window : Gtk::Window {
 		auto tau_label = manage(new Label("τ", ALIGN_START));
 		options->attach(*tau_label, 0, 0, 1, 1);
 		options->attach_next_to(tau_value, *tau_label, POS_RIGHT, 1, 1);
+		tau_value.set_text("1000");
+		auto gamma_label = manage(new Label("γ", ALIGN_START));
+		options->attach_next_to(*gamma_label, *tau_label, POS_BOTTOM, 1, 1);
+		options->attach_next_to(gamma_value, *gamma_label, POS_RIGHT, 1, 1);
+		auto sigma_label = manage(new Label("σ", ALIGN_START));
+		options->attach_next_to(*sigma_label, *gamma_label, POS_BOTTOM, 1, 1);
+		options->attach_next_to(sigma_value, *sigma_label, POS_RIGHT, 1, 1);
+		auto max_steps_label = manage(new Label("Steps", ALIGN_START));
+		options->attach_next_to(*max_steps_label, *sigma_label, POS_BOTTOM, 1, 1);
+		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
 
 		// Constraints Table
 		add_constraint->signal_activate().connect([&]{
@@ -157,17 +167,34 @@ struct main_window : Gtk::Window {
 		constraints_view.append_column_numeric_editable("b", constraints_columns.b, "%.2f");
 
 		// Output
-		auto main_scroll = manage(new ScrolledWindow());
-		paned->pack2(*main_scroll);
-		auto main_viewport = manage(new Viewport(main_scroll->get_hadjustment(), main_scroll->get_vadjustment()));
-		main_scroll->add(*main_viewport);
-		main_viewport->add(images);
+		auto scrolled_window = manage(new ScrolledWindow());
+		paned->pack2(*scrolled_window);
+		scrolled_window->add(steps_view);
+		steps_view.set_grid_lines(TREE_VIEW_GRID_LINES_VERTICAL);
+		steps_view.append_column("Description", steps_columns.name);
+		steps_view.append_column("n", steps_columns.n);
+		steps_view.append_column("i", steps_columns.i);
+		steps_view.append_column("τ", steps_columns.tau);
+		steps_view.append_column("σ", steps_columns.sigma);
+		steps_view.append_column("ϴ", steps_columns.theta);
+		steps_view.append_column("Image", steps_columns.img);
+
+		// Status
+		vbox->pack_start(statusbar, PACK_SHRINK);
+		statusbar.pack_end(progress);
 
 		constraints_menu.show_all();
 		show_all_children();
 		set_size_request(800, 600);
 
-		algorithm_done.connect([&]{algorithm_done_f();});
+		progress.hide();
+
+		algorithm_done.connect([&]{
+			// re-attach modified model
+			steps_view.set_model(steps_model);
+			steps_view.expand_all();
+			progress.hide();
+		});
 	}
 
 	// Select and load the image into a pixbuf.
@@ -182,18 +209,21 @@ struct main_window : Gtk::Window {
 
 		if(dialog.run() == RESPONSE_OK) {
 			input_image = Pixbuf::create_from_file(dialog.get_filename());
-			auto img = shared_ptr<labeled_image>(new labeled_image(input_image, "Input"));
-			clear_images();
-			output_images.push_back(img);
-			images.pack_start(*img, PACK_SHRINK);
+			steps_model->clear();
+			auto row = *steps_model->append();
+			row[steps_columns.img] = input_image;
+			row[steps_columns.name] = "Input";
 			run->set_sensitive(true);
 		}
 	}
 
 	// Run the algorithm in a new thread.
 	void do_run() {
-		clear_images();
-		Thread::create([&]{
+		// detach model for modification in thread
+		steps_view.unset_model();
+		progress.show();
+		// start thread
+		Threads::Thread::create([&]{
 			// The image to process
 			auto input = pixbuf_to_multi_array(input_image);
 			const auto h = input.shape()[0], w = input.shape()[1];
@@ -210,33 +240,43 @@ struct main_window : Gtk::Window {
 
 			// Parameters
 			const auto tau = boost::lexical_cast<float>(tau_value.get_text());
-			const float sigma = 0.5;
-			const float gamma = 1;
+			const float sigma = sigma_value.get_value();
+			const float gamma = gamma_value.get_value();
+			const int max_steps = max_steps_value.get_value_as_int();
+
+			steps_model->clear();
+			auto input_row = *steps_model->append();
+			input_row[steps_columns.img] = input_image;
+			input_row[steps_columns.name] = "Input";
+
+			TreeModel::iterator step_row;
+			int previous_step = -1;
 			
 			// run
 			auto result = chambolle_pock(
+				max_steps,
 				tau, sigma, gamma,
 				input, constraints,
-				[=](const boost::multi_array<float, 2> &x, string name){
-					// collect intermediates
-					output_images.push_back(shared_ptr<labeled_image>(new labeled_image(x, name)));
+				[&](const boost::multi_array<float, 2> &x, string name, int n, int i, float tau, float sigma, float theta){
+					if(n != previous_step) {
+						previous_step = n;
+						step_row = steps_model->append(input_row.children());
+						(*step_row)[steps_columns.name] = "Step";
+						(*step_row)[steps_columns.n] = boost::lexical_cast<string>(n);
+					}
+					auto row = *steps_model->append(step_row->children());
+					row[steps_columns.img] = multi_array_to_pixbuf(x);
+					row[steps_columns.name] = name;
+					row[steps_columns.n] = boost::lexical_cast<string>(n);
+					if(i >= 0) row[steps_columns.i] = boost::lexical_cast<string>(i);
+					if(tau != -1) row[steps_columns.tau] = boost::lexical_cast<string>(tau);
+					if(sigma != -1) row[steps_columns.sigma] = boost::lexical_cast<string>(sigma);
+					if(theta != -1) row[steps_columns.theta] = boost::lexical_cast<string>(theta);
+					progress.set_fraction(1.0 * n / max_steps);
 				}
 			);
-			output_images.push_back(shared_ptr<labeled_image>(new labeled_image(result, "Output")));
-			algorithm_done(); // in main thread
+			algorithm_done();
 		});
-	}
-
-	void algorithm_done_f() {
-		// display intermediate images
-		for(auto i : output_images)
-			images.pack_start(*i, PACK_SHRINK);
-	}
-
-	void clear_images() {
-		for(auto i : output_images)
-			images.remove(*i);
-		output_images.clear();
 	}
 
 };

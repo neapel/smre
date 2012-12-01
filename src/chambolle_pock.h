@@ -15,6 +15,16 @@ struct constraint {
 	boost::multi_array<float, 2> k;
 };
 
+typedef std::function<void(
+	const boost::multi_array<float, 2> &img,
+	std::string name,
+	int n,
+	int i,
+	float tau,
+	float sigma,
+	float theta
+)> debug_f;
+
 
 /**
  * given \f$\tau_0, \sigma_0, K_i, x^0, y^0_i \in \mathbb R^I\f$.
@@ -36,6 +46,6 @@ struct constraint {
  * 		\bar x^{n + 1} &= x^{n + 1} + \theta_n (x^{n + 1} - x^n)
  * 	\f}
  */
-boost::multi_array<float, 2> chambolle_pock(float tau, float sigma, float gamma, boost::multi_array<float, 2> &x, std::vector<constraint> &, std::function<void(const boost::multi_array<float, 2> &, std::string)> debug);
+boost::multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, float gamma, boost::multi_array<float, 2> &x, std::vector<constraint> &, debug_f debug);
 
 #endif

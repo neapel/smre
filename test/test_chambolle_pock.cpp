@@ -4,6 +4,7 @@
 #include <boost/program_options.hpp>
 #include <boost/regex.hpp>
 #include <stdexcept>
+#include <boost/format.hpp>
 
 using namespace mimas;
 using namespace std;
@@ -112,11 +113,10 @@ int main(int argc, char **argv) {
 	const float sigma = 1 / (tau * constraints_norm2);
 	const float gamma = 1;
 
-	chambolle_pock(tau, sigma, gamma, x, constraints, [=](const multi_array<float, 2> &x, string name){
-		cerr << name;
+	chambolle_pock(10, tau, sigma, gamma, x, constraints, [=](const multi_array<float, 2> &x, string name, int n, int i, float, float, float){
 		multi_array<float, 2> xn = x;
 		normalize(xn);
-		write_image(output_prefix + name + ".png", xn);
+		write_image(str(format("%s%d-%d-%s.png") % output_prefix % n % i % name), xn);
 	});
 
 	return EXIT_SUCCESS;
