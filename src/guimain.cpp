@@ -76,20 +76,12 @@ struct constraints_columns_t : TreeModel::ColumnRecord {
 };
 
 struct main_window : Gtk::Window {
-	VBox vbox;
-	Toolbar toolbar;
-	Paned main;
-	VBox left_pane;
-	Grid options;
-	Label tau_label{"τ", ALIGN_START};
 	Entry tau_value;
 
 	constraints_columns_t constraints_columns;
 	RefPtr<ListStore> constraints_model;
 	TreeView constraints_view;
 
-	ScrolledWindow main_scroll;
-	Viewport main_viewport;
 	HBox images;
 
 	Menu constraints_menu;
@@ -105,33 +97,38 @@ struct main_window : Gtk::Window {
 
 	main_window()
 	: constraints_model{ListStore::create(constraints_columns)},
-	  constraints_view{constraints_model},
-	  main_viewport{main_scroll.get_hadjustment(), main_scroll.get_vadjustment()}
+	  constraints_view{constraints_model}
 	{
 		// Main layout
-		add(vbox);
-		vbox.pack_start(toolbar, PACK_SHRINK);
+		auto vbox = manage(new VBox());
+		add(*vbox);
+		auto toolbar = manage(new Toolbar());
+		vbox->pack_start(*toolbar, PACK_SHRINK);
 
 		// Actions
 		load_image->set_is_important(true);
 		load_image->signal_activate().connect([&]{do_load_image();});
-		toolbar.append(*load_image->create_tool_item());
+		toolbar->append(*load_image->create_tool_item());
 
 		run->set_is_important(true);
 		run->set_sensitive(false);
 		run->signal_activate().connect([&]{do_run();});
-		toolbar.append(*run->create_tool_item());
+		toolbar->append(*run->create_tool_item());
 
 		// Main area
-		vbox.pack_start(main);
+		auto paned = manage(new Paned());
+		vbox->pack_start(*paned);
 
 		// Options
-		main.pack1(left_pane, SHRINK);
-		left_pane.pack_start(options, PACK_SHRINK);
-		options.set_border_width(10);
-		options.set_column_spacing(5);
-		options.attach(tau_label, 0, 0, 1, 1);
-		options.attach_next_to(tau_value, tau_label, POS_RIGHT, 1, 1);
+		auto left_pane = manage(new VBox());
+		paned->pack1(*left_pane, SHRINK);
+		auto options = manage(new Grid());
+		left_pane->pack_start(*options, PACK_SHRINK);
+		options->set_border_width(10);
+		options->set_column_spacing(5);
+		auto tau_label = manage(new Label("τ", ALIGN_START));
+		options->attach(*tau_label, 0, 0, 1, 1);
+		options->attach_next_to(tau_value, *tau_label, POS_RIGHT, 1, 1);
 
 		// Constraints Table
 		add_constraint->signal_activate().connect([&]{
@@ -140,7 +137,7 @@ struct main_window : Gtk::Window {
 			row[constraints_columns.b] = 1;
 			row[constraints_columns.kernel] = "box:1";
 		});
-		toolbar.append(*add_constraint->create_tool_item());
+		toolbar->append(*add_constraint->create_tool_item());
 		constraints_menu.append(*add_constraint->create_menu_item());
 
 		constraints_view.get_selection()->signal_changed().connect([&]{
@@ -150,7 +147,7 @@ struct main_window : Gtk::Window {
 			auto it = constraints_view.get_selection()->get_selected();
 			if(it) constraints_model->erase(it);
 		});
-		toolbar.append(*remove_constraint->create_tool_item());
+		toolbar->append(*remove_constraint->create_tool_item());
 		constraints_menu.append(*remove_constraint->create_menu_item());
 
 		constraints_view.signal_button_press_event().connect_notify([&](GdkEventButton *evt){
@@ -158,15 +155,17 @@ struct main_window : Gtk::Window {
 				constraints_menu.popup(evt->button, evt->time);
 		});
 
-		left_pane.pack_start(constraints_view);
+		left_pane->pack_start(constraints_view);
 		constraints_view.append_column_editable("Kernel", constraints_columns.kernel);
 		constraints_view.append_column_numeric_editable("a", constraints_columns.a, "%.2f");
 		constraints_view.append_column_numeric_editable("b", constraints_columns.b, "%.2f");
 
 		// Output
-		main.pack2(main_scroll);
-		main_scroll.add(main_viewport);
-		main_viewport.add(images);
+		auto main_scroll = manage(new ScrolledWindow());
+		paned->pack2(*main_scroll);
+		auto main_viewport = manage(new Viewport(main_scroll->get_hadjustment(), main_scroll->get_vadjustment()));
+		main_scroll->add(*main_viewport);
+		main_viewport->add(images);
 
 		constraints_menu.show_all();
 		show_all_children();
@@ -236,8 +235,6 @@ struct main_window : Gtk::Window {
 		// display intermediate images
 		for(auto i : output_images)
 			images.pack_start(*i, PACK_SHRINK);
-		auto adj = main_scroll.get_hadjustment();
-		adj->set_value(adj->get_upper());
 	}
 
 	void clear_images() {
