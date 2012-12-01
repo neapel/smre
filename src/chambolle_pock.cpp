@@ -30,6 +30,7 @@ multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, f
 
 	// Preprocess the kernels, i.e. pad and apply fourier transform.
 	multi_array<complex<float>, 2> fft_k[N], fft_conj_k[N];
+	float total_norm = 0;
 	for(size_t i = 0 ; i < N ; i++) {
 		// normalize kernel to sum=1
 		cons[i].k /= sum(cons[i].k);
@@ -39,12 +40,21 @@ multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, f
 		kernel_pad(cons[i].k, padded_kernel);
 		fftw::forward(padded_kernel, fft_k[i])();
 
+		// Calculate max norm of transformed kernel
+		float max_norm = 0;
+		for(auto row : fft_k[i]) for(auto value : row)
+			max_norm = max(norm(value), max_norm);
+		cout << "constraint " << i << " max norm=" << max_norm << endl;
+		total_norm += max_norm;
+
 		// Conjugate pad and transform kernel
 		fft_conj_k[i].resize(c_size);
 		auto t = conjugate_transpose(cons[i].k);
 		kernel_pad(t, padded_kernel);
 		fftw::forward(padded_kernel, fft_conj_k[i])();
 	}
+	// Adjust sigma with norm.
+	sigma /= tau * total_norm;
 
 	// Repeat until good enough.
 	for(size_t n = 0 ; n < max_steps ; n++) {

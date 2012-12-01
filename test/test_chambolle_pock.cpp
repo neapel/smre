@@ -85,8 +85,6 @@ int main(int argc, char **argv) {
 
 	// read input
 	auto x = read_image(input_file);
-	const size_t h = x.shape()[0], w = x.shape()[1];
-	const auto size = extents[h][w];
 	// x values in [-1 : 1]
 	x *= 2.0f;
 	x -= 1.0f;
@@ -96,21 +94,7 @@ int main(int argc, char **argv) {
 	for(auto c : pre_constraints)
 		constraints.push_back(c(x));
 
-	// calculate their fft's norm
-	multi_array<complex<float>, 2> kernel_fft(size);
-	double constraints_norm2 = 0;
-	for(auto c : constraints) {
-		kernel_pad(c.k, kernel_fft);
-		fftw::forward(kernel_fft, kernel_fft)();
-		double local_norm2 = 0;
-		for(auto row : kernel_fft)
-			for(auto value : row)
-				local_norm2 = max(pow(real(value), 2) + pow(imag(value), 2), local_norm2);
-		constraints_norm2 += local_norm2;
-	}
-	cerr << "Norm of constraints=" << constraints_norm2 << endl;
-
-	const float sigma = 1 / (tau * constraints_norm2);
+	const float sigma = 1;
 	const float gamma = 1;
 
 	chambolle_pock(10, tau, sigma, gamma, x, constraints, [=](const multi_array<float, 2> &x, string name, int n, int i, float, float, float){
