@@ -55,9 +55,7 @@ RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 
 struct main_window : Gtk::Window {
 	Entry tau_value;
-	SpinButton gamma_value{Adjustment::create(1, -5, 5), 0, 2};
-	SpinButton sigma_value{Adjustment::create(1, 0, 5), 0, 2};
-	SpinButton max_steps_value{Adjustment::create(10, 1, 100)};
+	SpinButton gamma_value, sigma_value, max_steps_value;
 	Statusbar statusbar;
 	ProgressBar progress;
 	Notebook notebook;
@@ -82,20 +80,23 @@ struct main_window : Gtk::Window {
 	TreeView steps_view;
 
 	Menu constraints_menu;
-	RefPtr<Action> add_constraint{Action::create("add_constraint", Stock::ADD, "_Add Constraint")};
-	RefPtr<Action> remove_constraint{Action::create("remove_constraint", Stock::REMOVE, "Remo_ve Constraint")};
-
-	RefPtr<Action> load_image{Action::create("load_image", Stock::OPEN, "_Load Image")};
-	RefPtr<Action> run{Action::create("run", Stock::EXECUTE, "_Run Chambolle-Pock")};
+	RefPtr<Action> add_constraint, remove_constraint, load_image, run;
 
 	Dispatcher algorithm_done;
 	RefPtr<Pixbuf> input_image;
 
 	main_window()
-	: constraints_model{ListStore::create(constraints_columns)},
+	: gamma_value{Adjustment::create(1, -5, 5), 0, 2},
+	  sigma_value{Adjustment::create(1, 0, 5), 0, 2},
+	  max_steps_value{Adjustment::create(10, 1, 100)},
+	  constraints_model{ListStore::create(constraints_columns)},
 	  constraints_view{constraints_model},
 	  steps_model{TreeStore::create(steps_columns)},
-	  steps_view{steps_model}
+	  steps_view{steps_model},
+	  add_constraint{Action::create("add_constraint", Stock::ADD, "_Add Constraint")},
+	  remove_constraint{Action::create("remove_constraint", Stock::REMOVE, "Remo_ve Constraint")},
+	  load_image{Action::create("load_image", Stock::OPEN, "_Load Image")},
+	  run{Action::create("run", Stock::EXECUTE, "_Run Chambolle-Pock")}
 	{
 		// Main layout
 		auto vbox = manage(new VBox());
