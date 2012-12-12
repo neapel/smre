@@ -244,6 +244,8 @@ struct main_window : Gtk::Window {
 
 			// The image to process
 			auto input = pixbuf_to_multi_array(input_image);
+			auto y = input;
+			fill(y,0);
 			const auto h = input.shape()[0], w = input.shape()[1];
 
 			// Actually create constraints now.
@@ -253,7 +255,7 @@ struct main_window : Gtk::Window {
 				const auto b = r.get_value(constraints_columns.b);
 				const auto ks = r.get_value(constraints_columns.kernel);
 				const auto kernel = kernel_from_string(ks)(w, h);
-				constraints.push_back(constraint{a, b, input, kernel});
+				constraints.push_back(constraint{a, b, y, kernel});
 			}
 
 			// Parameters

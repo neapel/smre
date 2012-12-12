@@ -41,7 +41,9 @@ void validate(any &v, const vector<string> &values, pre_constraint *, int) {
 		auto kernel = kernel_from_string(m["kernel"]);
 		v = any(pre_constraint([=](const multi_array<float, 2> &x){
 			const auto h = x.shape()[0], w = x.shape()[1];
-			return constraint{a, b, x, kernel(w, h)};
+			multi_array<float, 2> y(x);
+			fill(y,0);
+			return constraint{a, b, y, kernel(w, h)};
 		}));
 	} else {
 		throw validation_error(validation_error::invalid_option_value);

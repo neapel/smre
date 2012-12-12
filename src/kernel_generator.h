@@ -28,7 +28,7 @@ kernel_generator box_kernel(size_t size) {
 	using namespace boost;
 	return [=](size_t, size_t) {
 		multi_array<float, 2> k(extents[size][size]);
-		fill(k, 1);
+		fill(k, 1.0f/size);
 		return k;
 	};
 }

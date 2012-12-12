@@ -58,14 +58,13 @@ bool is_continuous(const A &a) {
  * the kernel center(=origin) is at the corners of the output array. 
  * Doesn't modify cells not covered by the kernel, use mimas::operator= */
 template<class T1, class T2>
-void kernel_pad(const boost::multi_array<T1, 2> &in, boost::multi_array<T2, 2> &out) {
+void kernel_pad(const boost::multi_array<T1, 2> &in, boost::multi_array<T2, 2> &out, bool conjugate = false) {
 	const size_t w = out.shape()[0], h = out.shape()[1], kw = in.shape()[0], kh = in.shape()[1];
-	// kernel origin = corner
-	const size_t dx = w - kw/2;
-	const size_t dy = h - kh/2;
-	for(size_t y = 0 ; y < kh ; y++)
-		for(size_t x = 0 ; x < kw ; x++)
-			out[(y+dy) % h][(x+dx) % w] = in[y][x];
+	const size_t dx = conjugate ? (w - kw + 1) : 0, dy = conjugate ? (h - kh + 1) : 0;
+
+	for(size_t x = 0 ; x < kw ; x++)
+		for(size_t y = 0 ; y < kh ; y++)
+			out[(x+dx) % w][(y+dy) % h] = in[x][y];
 }
 
 
