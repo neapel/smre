@@ -12,10 +12,15 @@ inline float clamp(float x, float low, float high) {
 	return x;
 }
 
-multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, float gamma, multi_array<float, 2> &x, vector<constraint> &cons, debug_f debug) {
+#define debug(...) \
+	if(debug) debug_log.push_back(debug_state{__VA_ARGS__});
+
+multi_array<float, 2> chambolle_pock::run(const multi_array<float, 2> &x_in) {
 	assert(sigma > 0);
 
-	const size_t N = cons.size();
+	auto x = x_in;
+
+	const size_t N = constraints.size();
 
 	const auto size = extents_of(x);
 	const auto width = size[0], height = size[1];
@@ -28,17 +33,18 @@ multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, f
 	// arrays
 	multi_array<float, 2> bar_x = x, w(size), convolved(size), dx(size), Y = x, padded_kernel(size);
 	multi_array<complex<float>, 2> fft_bar_x(c_size), fft_conv(c_size);
+	vector<multi_array<float, 2>> y;
 
 	// Preprocess the kernels, i.e. pad and apply fourier transform.
 	multi_array<complex<float>, 2> fft_k[N], fft_conj_k[N];
 	float total_norm = 0;
 	for(size_t i = 0 ; i < N ; i++) {
-		// normalize kernel to sum=1
-		//cons[i].k /= sqrt(sum(cons[i].k));
+		// Get kernel
+		auto k = constraints[i]->get_k(x_in);
 
 		// Pad and transform kernel
 		fft_k[i].resize(c_size);
-		kernel_pad(cons[i].k, padded_kernel);
+		kernel_pad(k, padded_kernel);
 		fftw::forward(padded_kernel, fft_k[i])();
 
 		// Calculate max norm of transformed kernel
@@ -50,10 +56,12 @@ multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, f
 
 		// Conjugate pad and transform kernel
 		fft_conj_k[i].resize(c_size);
-		auto t = conjugate_transpose(cons[i].k);
+		auto t = conjugate_transpose(k);
 		fill(padded_kernel,0);
 		kernel_pad(t, padded_kernel,1);
 		fftw::forward(padded_kernel, fft_conj_k[i])();
+
+		y.push_back(multi_array<float, 2>(size));
 	}
 	// Adjust sigma with norm.
 	sigma /= tau * total_norm;
@@ -73,16 +81,16 @@ multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, f
 				for(size_t iy = 0 ; iy < c_height ; iy++)
 					fft_conv[ix][iy] = fft_k[i][ix][iy] * fft_bar_x[ix][iy] * scale;
 			fftw::backward(fft_conv, convolved)();
-			debug(convolved, "convolved", n, i, tau, sigma, -1);
+			debug(convolved, "convolved", (int)n, (int)i, tau, sigma, -1);
 
 			// calculate new y_i
 			for(size_t ix = 0 ; ix < width ; ix++)
 				for(size_t iy = 0 ; iy < height ; iy++)
-					cons[i].y[ix][iy] = clamp(cons[i].y[ix][iy] + sigma * convolved[ix][iy], cons[i].a*sigma, cons[i].b*sigma);
-			debug(cons[i].y, "y", n, i, tau, sigma, -1);
+					y[i][ix][iy] = clamp(y[i][ix][iy] + sigma * convolved[ix][iy], constraints[i]->a * sigma, constraints[i]->b * sigma);
+			debug(y[i], "y", (int)n, (int)i, tau, sigma, -1);
 
 			// convolve y_i with conjugate transpose of kernel
-			fftw::forward(cons[i].y, fft_conv)();
+			fftw::forward(y[i], fft_conv)();
 			for(size_t ix = 0 ; ix < c_width ; ix++)
 				for(size_t iy = 0 ; iy < c_height ; iy++)
 					fft_conv[ix][iy] *= fft_conj_k[i][ix][iy] * scale;
@@ -91,7 +99,7 @@ multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, f
 			// accumulate
 			w += convolved;
 		}
-		debug(w, "w", n, -1, tau, sigma, -1);
+		debug(w, "w", (int)n, -1, tau, sigma, -1);
 
 		auto old_x = x;
 
@@ -99,7 +107,7 @@ multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, f
 		for(size_t ix = 0 ; ix < width ; ix++)
 			for(size_t iy = 0 ; iy < height ; iy++)
 				x[ix][iy] = (x[ix][iy] - tau * w[ix][iy] + tau * Y[ix][iy]) / (1 + tau);
-		debug(Y-x, "x", n, -1, tau, sigma, -1);
+		debug(Y-x, "x", (int)n, -1, tau, sigma, -1);
 
 		// theta
 		const float theta = 1 / sqrt(1 + 2 * tau * gamma);
@@ -111,7 +119,7 @@ multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, f
 		for(size_t ix = 0 ; ix < width ; ix++)
 			for(size_t iy = 0 ; iy < height ; iy++)
 				bar_x[ix][iy] = x[ix][iy] + theta * (x[ix][iy] - old_x[ix][iy]);
-		debug(bar_x, "x̄", n, -1, tau, sigma, theta);
+		debug(bar_x, "x̄", (int)n, -1, tau, sigma, theta);
 	}
 
 	return Y-x;

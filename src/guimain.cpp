@@ -1,6 +1,10 @@
 #include <gtkmm.h>
 #include <iostream>
 #include <memory>
+#include <boost/program_options.hpp>
+#include <boost/regex.hpp>
+#include <stdexcept>
+#include <boost/format.hpp>
 #include "config.h"
 
 #include "chambolle_pock.h"
@@ -27,7 +31,7 @@ boost::multi_array<float, 2> pixbuf_to_multi_array(const RefPtr<Pixbuf> &pb) {
 }
 
 // Copy multi_array data [-1:1] into a new pixbuf [0:255]
-RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
+RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a, bool mark_outliers = true) {
 	auto h = a.shape()[0], w = a.shape()[1];
 	auto pb = Pixbuf::create(COLORSPACE_RGB, false, 8, w, h);
 	auto px = pb->get_pixels();
@@ -35,29 +39,35 @@ RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 	for(size_t y = 0 ; y != h ; y++)
 		for(size_t x = 0 ; x != w ; x++) {
 			int value = 255 * (a[y][x] + 1) / 2;
-			auto offset = y * stride + 3 * x;
-			if(value > 255) {
-				px[offset + 0] = 0;
-				px[offset + 1] = 0;
-				px[offset + 2] = 0xff;
-			} else if(value < 0) {
-				px[offset + 0] = 0xff;
-				px[offset + 1] = 0;
-				px[offset + 2] = 0;
-			} else {
-				for(size_t s = 0 ; s != 3 ; s++)
-					px[offset + s] = value;
-			}
+			if(!mark_outliers) value = max(0, min(255, value));
+			auto p = px + (y * stride + 3 * x);
+			if(value > 255) { p[0] = p[1] = 0; p[2] = 255; }
+			else if(value < 0) { p[0] = 255; p[1] = p[2] = 0; }
+			else { p[0] = p[1] = p[2] = value; }
 		}
 	return pb;
 }
 
 
-struct main_window : Gtk::Window {
-	Entry tau_value;
-	SpinButton gamma_value, sigma_value, max_steps_value;
+struct user_constraint : constraint {
+	string expr;
+
+	user_constraint(float a, float b, string e) : constraint{a, b}, expr(e) {}
+
+	boost::multi_array<float, 2> get_k(const boost::multi_array<float, 2> &img) {
+		auto h = img.shape()[0], w = img.shape()[1];
+		return kernel_from_string(expr)(w, h);
+	};
+};
+
+
+struct main_window : Gtk::ApplicationWindow {
+	chambolle_pock &p;
+	RefPtr<Pixbuf> input_image;
+
+	SpinButton tau_value, gamma_value, sigma_value, max_steps_value;
 	Statusbar statusbar;
-	ProgressBar progress;
+	Spinner progress;
 	Notebook notebook;
 	Image original_image, output_image;
 
@@ -83,12 +93,13 @@ struct main_window : Gtk::Window {
 	RefPtr<Action> add_constraint, remove_constraint, load_image, run;
 
 	Dispatcher algorithm_done;
-	RefPtr<Pixbuf> input_image;
 
-	main_window()
-	: gamma_value{Adjustment::create(1, -5, 5), 0, 2},
-	  sigma_value{Adjustment::create(1, 0, 5), 0, 2},
-	  max_steps_value{Adjustment::create(10, 1, 100)},
+	main_window(chambolle_pock &p)
+	: p(p),
+	  tau_value{Adjustment::create(p.tau, 0, 1000), 0, 2},
+	  gamma_value{Adjustment::create(p.gamma, -5, 5), 0, 2},
+	  sigma_value{Adjustment::create(p.sigma, 0, 5), 0, 2},
+	  max_steps_value{Adjustment::create(p.max_steps, 1, 100)},
 	  constraints_model{ListStore::create(constraints_columns)},
 	  constraints_view{constraints_model},
 	  steps_model{TreeStore::create(steps_columns)},
@@ -128,7 +139,6 @@ struct main_window : Gtk::Window {
 		auto tau_label = manage(new Label("τ", ALIGN_START));
 		options->attach(*tau_label, 0, 0, 1, 1);
 		options->attach_next_to(tau_value, *tau_label, POS_RIGHT, 1, 1);
-		tau_value.set_text("1000");
 		auto gamma_label = manage(new Label("γ", ALIGN_START));
 		options->attach_next_to(*gamma_label, *tau_label, POS_BOTTOM, 1, 1);
 		options->attach_next_to(gamma_value, *gamma_label, POS_RIGHT, 1, 1);
@@ -139,7 +149,20 @@ struct main_window : Gtk::Window {
 		options->attach_next_to(*max_steps_label, *sigma_label, POS_BOTTOM, 1, 1);
 		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
 
+		// Connect to model
+		#define connect_value(val, var) val.signal_value_changed().connect([&]{var = val.get_value();})
+		connect_value(tau_value, p.tau);
+		connect_value(gamma_value, p.gamma);
+		connect_value(sigma_value, p.sigma);
+		connect_value(max_steps_value, p.max_steps);
+
 		// Constraints Table
+		for(auto cons : p.constraints) {
+			auto row = *constraints_model->append();
+			row[constraints_columns.a] = cons->a;
+			row[constraints_columns.b] = cons->b;
+			row[constraints_columns.kernel] = dynamic_pointer_cast<user_constraint>(cons)->expr;
+		}
 		add_constraint->signal_activate().connect([&]{
 			auto row = *constraints_model->append();
 			row[constraints_columns.a] = -1;
@@ -191,13 +214,14 @@ struct main_window : Gtk::Window {
 		steps_view.append_column("ϴ", steps_columns.theta);
 		steps_view.append_column("Image", steps_columns.img);
 
-		// Status
-		vbox->pack_start(statusbar, PACK_SHRINK);
-		statusbar.pack_end(progress);
+		auto progress_b = manage(new ToolButton(progress));
+		progress_b->set_expand(true);
+		progress_b->set_sensitive(false);
+		toolbar->append(*progress_b);
 
 		constraints_menu.show_all();
 		show_all_children();
-		//set_size_request(800, 600);
+		set_default_size(800, 600);
 
 		progress.hide();
 
@@ -205,7 +229,9 @@ struct main_window : Gtk::Window {
 			// re-attach modified model
 			steps_view.set_model(steps_model);
 			steps_view.expand_all();
+			progress.stop();
 			progress.hide();
+			notebook.set_current_page(1); // output
 		});
 	}
 
@@ -219,86 +245,79 @@ struct main_window : Gtk::Window {
 		filter->add_pixbuf_formats();
 		dialog.add_filter(filter);
 
-		if(dialog.run() == RESPONSE_OK) {
-			input_image = Pixbuf::create_from_file(dialog.get_filename());
-			steps_model->clear();
-			auto row = *steps_model->append();
-			row[steps_columns.img] = input_image;
-			row[steps_columns.name] = "Input";
-			original_image.set(input_image);
-			output_image.set(input_image);
-			run->set_sensitive(true);
-		}
+		if(dialog.run() == RESPONSE_OK)
+			open(dialog.get_filename());
+	}
+
+	void open(RefPtr<Pixbuf> image) {
+		input_image = image;
+		steps_model->clear();
+		auto row = *steps_model->append();
+		row[steps_columns.img] = input_image;
+		row[steps_columns.name] = "Input";
+		original_image.set(input_image);
+		output_image.set(input_image);
+		run->set_sensitive(true);
+	}
+
+	void open(string filename) {
+		open(Pixbuf::create_from_file(filename));
 	}
 
 	// Run the algorithm in a new thread.
 	void do_run() {
+		progress.start();
+		progress.show();
+
+		// Actually create constraints now.
+		p.constraints.clear();
+		for(TreeRow r : constraints_model->children()) {
+			const auto a = r.get_value(constraints_columns.a);
+			const auto b = r.get_value(constraints_columns.b);
+			const auto ks = r.get_value(constraints_columns.kernel);
+			p.constraints.push_back(shared_ptr<constraint>(new user_constraint{a, b, ks}));
+		}
+
+		// Debug mode?
+		p.debug = notebook.get_current_page() == 2;
+		// detach model for modification in thread
+		if(p.debug) steps_view.unset_model();
+
 		// start thread
 		Threads::Thread::create([&]{
-			// Debug mode?
-			const auto debug = notebook.get_current_page() == 2;
-			progress.set_fraction(0);
-			progress.show();
-			// detach model for modification in thread
-			if(debug) steps_view.unset_model();
-
 			// The image to process
 			auto input = pixbuf_to_multi_array(input_image);
-			auto y = input;
-			fill(y,0);
-			const auto h = input.shape()[0], w = input.shape()[1];
 
-			// Actually create constraints now.
-			vector<constraint> constraints;
-			for(TreeRow r : constraints_model->children()) {
-				const auto a = r.get_value(constraints_columns.a);
-				const auto b = r.get_value(constraints_columns.b);
-				const auto ks = r.get_value(constraints_columns.kernel);
-				const auto kernel = kernel_from_string(ks)(w, h);
-				constraints.push_back(constraint{a, b, y, kernel});
-			}
+			// run
+			auto run_p = p;
+			auto result = run_p.run(input);
+			output_image.set(multi_array_to_pixbuf(result));
 
-			// Parameters
-			const auto tau = boost::lexical_cast<float>(tau_value.get_text());
-			const float sigma = sigma_value.get_value();
-			const float gamma = gamma_value.get_value();
-			const int max_steps = max_steps_value.get_value_as_int();
-
-			TreeModel::iterator input_row, step_row;
-			int previous_step = -1;
-			if(debug) {
+			if(p.debug) {
+				int previous_step = -1;
 				steps_model->clear();
-				step_row = input_row = steps_model->append();
+				auto step_row = steps_model->append();
+				auto input_row = step_row;
 				(*input_row)[steps_columns.img] = input_image;
 				(*input_row)[steps_columns.name] = "Input";
-			}
-			
-			// run
-			auto result = chambolle_pock(
-				max_steps,
-				tau, sigma, gamma,
-				input, constraints,
-				[&](const boost::multi_array<float, 2> &x, string name, int n, int i, float tau, float sigma, float theta){
-					if(debug) {
-						if(n != previous_step) {
-							previous_step = n;
-							step_row = steps_model->append(input_row->children());
-							(*step_row)[steps_columns.name] = "Step";
-							(*step_row)[steps_columns.n] = boost::lexical_cast<string>(n);
-						}
-						auto row = *steps_model->append(step_row->children());
-						row[steps_columns.img] = multi_array_to_pixbuf(x);
-						row[steps_columns.name] = name;
-						row[steps_columns.n] = boost::lexical_cast<string>(n);
-						if(i >= 0) row[steps_columns.i] = boost::lexical_cast<string>(i);
-						if(tau != -1) row[steps_columns.tau] = boost::lexical_cast<string>(tau);
-						if(sigma != -1) row[steps_columns.sigma] = boost::lexical_cast<string>(sigma);
-						if(theta != -1) row[steps_columns.theta] = boost::lexical_cast<string>(theta);
+				for(auto l : run_p.debug_log) {
+					if(l.n != previous_step) {
+						previous_step = l.n;
+						step_row = steps_model->append(input_row->children());
+						(*step_row)[steps_columns.name] = "Step";
+						(*step_row)[steps_columns.n] = boost::lexical_cast<string>(l.n);
 					}
-					progress.set_fraction(1.0 * n / max_steps);
-				}
-			);
-			output_image.set(multi_array_to_pixbuf(result));
+					auto row = *steps_model->append(step_row->children());
+					row[steps_columns.img] = multi_array_to_pixbuf(l.img);
+					row[steps_columns.name] = l.name;
+					row[steps_columns.n] = boost::lexical_cast<string>(l.n);
+					if(l.i >= 0) row[steps_columns.i] = boost::lexical_cast<string>(l.i);
+					if(l.tau != -1) row[steps_columns.tau] = boost::lexical_cast<string>(l.tau);
+					if(l.sigma != -1) row[steps_columns.sigma] = boost::lexical_cast<string>(l.sigma);
+					if(l.theta != -1) row[steps_columns.theta] = boost::lexical_cast<string>(l.theta);
+				};
+			}
+
 			algorithm_done();
 		});
 	}
@@ -306,8 +325,100 @@ struct main_window : Gtk::Window {
 };
 
 
+using namespace Gio;
+
+OptionEntry entry(string name, string desc) {
+	OptionEntry e;
+	e.set_long_name(name);
+	e.set_description(desc);
+	return e;
+}
+
+struct app_t : Gtk::Application {
+	RefPtr<Pixbuf> input_image;
+	main_window *main;
+
+	// parameters.
+	chambolle_pock p;
+
+	app_t() : Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE) {}
+
+	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
+		using namespace boost;
+		if(!has_value) return false;
+		static regex r("(?<kernel>[^,]+)"
+							"(,(?<a>-?\\d*\\.?\\d*)"
+							",(?<b>-?\\d*\\.?\\d*))?");
+		smatch m;
+		if(!regex_match(string(value), m, r)) return false;
+		const float a = m["a"].matched ? lexical_cast<float>(m["a"]) : -1;
+		const float b = m["b"].matched ? lexical_cast<float>(m["b"]) :  1;
+		auto kernel = m["kernel"];
+		p.constraints.push_back(std::shared_ptr<constraint>(new user_constraint{a, b, kernel}));
+		return true;
+	}
+
+	int on_command_line(const RefPtr<ApplicationCommandLine> &cmd) {
+		// define arguments
+		OptionContext ctx("[FILE]");
+		OptionGroup group("params", "default parameters", "longer");
+
+		group.add_entry(entry("tau", "initial value for tau"), (double&)p.tau);
+		group.add_entry(entry("sigma", "initial value for sigma"), (double&)p.sigma);
+		group.add_entry(entry("gamma", "initial value for gamma"), (double&)p.gamma);
+		group.add_entry(entry("steps", "number of iteration steps"), (int&)p.max_steps);
+
+		group.add_entry(entry("constraint", "kernels 'box:SIZE[,A,B]' or 'gauss:SIGMA[,A,B]'"),
+			mem_fun(*this, &app_t::parse_constraint));
+
+		string output_file;
+		group.add_entry_filename(entry("output", "save output PNG here (runs without GUI)."), output_file);
+
+		ctx.set_main_group(group);
+
+		// parse them
+		OptionGroup gtkgroup(gtk_get_option_group(true));
+		ctx.add_group(gtkgroup);
+		int argc;
+		char **argv = cmd->get_arguments(argc);
+		ctx.parse(argc, argv);
+
+		// remaining arguments: filenames. open them.
+		vector<RefPtr<File>> files;
+		for(auto i = 1 ; i < argc ; i++)
+			files.push_back(File::create_for_commandline_arg(argv[i]));
+		if(!files.empty()) open(files);
+
+		// run.
+		if(output_file.empty())
+			activate(); // show the gui.
+		else if(input_image) {
+			// CLI mode.
+			auto input = pixbuf_to_multi_array(input_image);
+			auto run_p = p;
+			auto output = run_p.run(input);
+			multi_array_to_pixbuf(output, false)->save(output_file, "png");
+		} else {
+			cmd->printerr("When using --output, you must specify an input image, too.");
+			return EXIT_FAILURE;
+		}
+
+		return EXIT_SUCCESS;
+	}
+
+	void on_open(const vector<RefPtr<File>> &files, const ustring &) {
+		if(files.size() != 1) throw runtime_error("can only open one file.");
+		input_image = Pixbuf::create_from_stream(files[0]->read());
+	}
+
+	void on_activate() {
+		main = new main_window(p);
+		add_window(*main);
+		if(input_image) main->open(input_image);
+		main->show();
+	}
+};
+
 int main(int argc, char **argv) {
-	auto app = Application::create(argc, argv, "smre.main");
-	main_window main;
-	app->run(main);
+	return app_t().run(argc, argv);
 }

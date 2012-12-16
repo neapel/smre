@@ -5,25 +5,26 @@
 #include <vector>
 #include <functional>
 #include <string>
+#include <memory>
 
 /**
  * One constraint: \f$ a \le (k * x)_w \le b \quad\forall w \in I \f$
  */
 struct constraint {
+	// clamp
 	float a, b;
-	boost::multi_array<float, 2> y;
-	boost::multi_array<float, 2> k;
+	constraint(float a, float b) : a(a), b(b) {}
+
+	// lazy generator
+	virtual boost::multi_array<float, 2> get_k(const boost::multi_array<float, 2> &) = 0;
 };
 
-typedef std::function<void(
-	const boost::multi_array<float, 2> &img,
-	std::string name,
-	int n,
-	int i,
-	float tau,
-	float sigma,
-	float theta
-)> debug_f;
+struct debug_state {
+	const boost::multi_array<float, 2> &img;
+	std::string name;
+	int n, i;
+	float tau, sigma, theta;
+};
 
 
 /**
@@ -46,6 +47,25 @@ typedef std::function<void(
  * 		\bar x^{n + 1} &= x^{n + 1} + \theta_n (x^{n + 1} - x^n)
  * 	\f}
  */
-boost::multi_array<float, 2> chambolle_pock(size_t max_steps, float tau, float sigma, float gamma, boost::multi_array<float, 2> &x, std::vector<constraint> &, debug_f debug);
+struct chambolle_pock {
+	size_t max_steps;
+	float tau, sigma, gamma;
+	std::vector<std::shared_ptr<constraint>> constraints;
+	std::vector<debug_state> debug_log;
+	bool debug;
+
+	chambolle_pock()
+	: max_steps(10), tau(50), sigma(1), gamma(1) {}
+
+	boost::multi_array<float, 2> run(const boost::multi_array<float, 2> &);
+
+#if HAVE_OPENCL
+	boost::multi_array<float, 2> run_cl(const boost::multi_array<float, 2> &);
+#endif
+};
+
+
+
+
 
 #endif
