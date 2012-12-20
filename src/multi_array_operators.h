@@ -54,6 +54,15 @@ bool is_continuous(const A &a) {
 }
 
 
+/** Returns the real part of a complex array */
+template<typename T, size_t N>
+boost::multi_array<T, N> real(const boost::multi_array<std::complex<T>, N> &a) {
+	auto out = mimas::empty_clone<T>(a);
+	mimas::multi_apply(out, a, [](T &o, const std::complex<T> &v){ o = real(v); });
+	return out;
+}
+
+
 /** Copies the elements of a kernel into the output array such that
  * the kernel center(=origin) is at the corners of the output array. 
  * Doesn't modify cells not covered by the kernel, use mimas::operator= */

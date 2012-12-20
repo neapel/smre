@@ -16,13 +16,9 @@ typedef complex<float> cfloat;
 typedef multi_array<float, 2> float_a;
 typedef multi_array<cfloat, 2> cfloat_a;
 
-template<class T1, class T2>
-multi_array<T1, 2> like(const multi_array<T2, 2> &r) {
-	return multi_array<T1, 2>(extents[r.shape()[1]][r.shape()[0]]);
-}
 
 cfloat_a to_complex(float_a in) {
-	auto out = like<cfloat>(in);
+	auto out = empty_clone<cfloat>(in);
 	for(size_t y = 0 ; y < in.shape()[1] ; y++)
 		for(size_t x = 0 ; x < in.shape()[0] ; x++)
 			out[y][x] = in[y][x];
@@ -30,7 +26,7 @@ cfloat_a to_complex(float_a in) {
 }
 
 float_a from_complex(cfloat_a in) {
-	auto out = like<float>(in);
+	auto out = empty_clone<float>(in);
 	for(size_t y = 0 ; y < in.shape()[1] ; y++)
 		for(size_t x = 0 ; x < in.shape()[0] ; x++)
 			out[y][x] = in[y][x].real();
@@ -51,7 +47,7 @@ multi_array<T, 2> pad(const multi_array<T, 2> &in, const size_t *shape) {
 float_a convolution_cpu_naive(const float_a &in, const float_a &kernel) {
 	const size_t w = in.shape()[0], h = in.shape()[1],
 	            kw = kernel.shape()[0], kh = kernel.shape()[1];
-	auto out = like<float>(in);
+	auto out = empty_clone<float>(in);
 	const size_t dx = w - kw/2, dy = h - kh/2; // kernel origin = center
 	for(size_t i = 0 ; i < h ; i++)
 		for(size_t j = 0 ; j < w ; j++) {
@@ -74,7 +70,7 @@ float_a convolution_cpu_fft(const float_a &in, const float_a &kernel_small) {
 	fftw::forward(in, in_f)();
 	fftw::forward(kernel, kernel_f)();
 	auto out_c = in_f * kernel_f;
-	auto out = like<float>(in);
+	auto out = empty_clone<float>(in);
 	fftw::backward(out_c, out)();
 	out /= float(w * h);
 	return out;
@@ -84,7 +80,7 @@ float_a convolution_cpu_fft(const float_a &in, const float_a &kernel_small) {
 /** Naive convolution of real data on the CL device. */
 float_a convolution_cl_naive(context &ctx, const float_a &in, const float_a &kernel) {
 	const unsigned int h = in.shape()[1], w = in.shape()[0], kh = kernel.shape()[1], kw = kernel.shape()[0];
-	auto out = like<float>(in);
+	auto out = empty_clone<float>(in);
 	buffer b_in(sizeof(float) * w * h, stream_in),
 			b_out(sizeof(float) * w * h, stream_out),
 			b_kernel(sizeof(float) * kw * kh, stream_in);
@@ -115,7 +111,7 @@ float_a convolution_cl_naive(context &ctx, const float_a &in, const float_a &ker
 float_a convolution_cl_fft(context &ctx, const float_a &in, const float_a &kernel_small) {
 	auto kernel = pad(to_complex(kernel_small), in.shape());
 	auto in_c = to_complex(in);
-	auto out_c = like<cfloat>(in);
+	auto out_c = empty_clone<cfloat>(in);
 	const unsigned int h = in.shape()[1], w = in.shape()[0];
 	const unsigned int N = sizeof(complex<float>) * w * h;
 	buffer b_in(N, stream_in), b_temp(N, temp), b_out(N, stream_out),
@@ -173,7 +169,7 @@ int main(int argc, char **argv) {
 #endif
 
 	// output
-	auto out = like<float>(in);
+	auto out = empty_clone<float>(in);
 
 	// run each method:
 	cerr << "cpu fft" << endl;

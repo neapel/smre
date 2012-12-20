@@ -17,6 +17,7 @@
 #include <initializer_list>
 #include <stdexcept>
 #include <boost/type_traits/is_same.hpp>
+#include <map>
 
 
 /**
@@ -28,6 +29,8 @@ struct context;
 struct buffer;
 struct buffer_write;
 struct buffer_read;
+struct buffer_fill;
+struct buffer_copy;
 struct program;
 struct kernel;
 struct event;
@@ -93,8 +96,6 @@ struct event {
 	cl_event native;
 
 	// DO allow copying
-	event(const event &) = default;
-	event(event &&) = default;
 
 	event(const context *, cl_event);
 
@@ -140,6 +141,12 @@ struct after {
 	/** Queue a read operation after these events */
 	event operator()(buffer_read &&);
 
+	/** Queue a fill operation after these events */
+	event operator()(buffer_fill &&);
+
+	/** Queue a copy operation after these events */
+	event operator()(buffer_copy &&);
+
 	/** Queue a computation after these events */
 	event operator()(const kernel &);
 
@@ -150,6 +157,9 @@ struct after {
 
 	/** Returns when all events were triggered. */
 	void resume();
+
+	/** Returns an event that is triggered when all events were triggered. */
+	event barrier();
 };
 
 
@@ -184,6 +194,11 @@ struct context {
 	template<typename T>
 	event operator()(T &&op) {
 		return after(this)( std::move(op) );
+	}
+
+	/** Wait for all operations to finish */
+	void wait() {
+		return after(this).resume();
 	}
 };
 
@@ -227,8 +242,10 @@ struct kernel {
 	cl_kernel native;
 	context *parent_context;
 	size_t argument_count;
+	std::string name;
 	std::vector<size_t> global_size;
 	std::vector<size_t> global_offset;
+	std::map<size_t, buffer *> buffer_arguments;
 
 	// DO allow copying
 	kernel(const kernel &) = default;
@@ -254,16 +271,23 @@ private:
 public:
 	/** Set all arguments of the kernel to new values. */
 	template<typename... T>
+	kernel &operator()(T &... a) {
+		argsN<0u>(a...);
+		return *this;
+	}
+
+	/** Set all arguments of the kernel to new values. */
+	template<typename... T>
 	kernel &args(T &... a) {
 		argsN<0u>(a...);
 		return *this;
 	}
 
 	/**
-	 * Set one positional argument of the kernel to a new value.
+	 * Set one positional argument of the kernel to a new value immediately.
 	 */
 	template<typename T>
-	void arg(cl_uint i, const T &data) {
+	void arg(size_t i, const T &data) {
 		cl_uint status = clSetKernelArg(
 			native,
 			i,
@@ -276,9 +300,11 @@ public:
 
 	/**
 	 * Set one positional argument of the kernel to a reference to the buffer.
+	 * (defers until actual execution since buffer size might be unknown yet)
 	 */
-	void arg(cl_uint i, buffer &buf);
-
+	void arg(size_t i, buffer &buf) {
+		buffer_arguments[i] = &buf;
+	}
 
 	/**
 	 * Set the work size and offset (i.e. the range and offset for {@code get_global_id(dim)} in the kernel).
@@ -319,6 +345,35 @@ enum buffer_access : int {
 	temp = kernel_read | kernel_write,
 };
 
+
+
+/**
+ * A fill operation that repeats the given pattern
+ */
+struct buffer_fill {
+	buffer &buf;
+	const void *pattern;
+	size_t pattern_size, offset, size;
+	buffer_fill(const buffer_fill &) = delete;
+	buffer_fill(buffer_fill &&) = default;
+	buffer_fill(buffer &buf, const void *pattern, size_t pattern_size, size_t offset = 0, size_t size = 0)
+		: buf(buf), pattern(pattern), pattern_size(pattern_size), offset(offset), size(size) {}
+};
+
+/**
+ * A copy operation between buffers.
+ * size=0 means min(src.size, dst.size)
+ */
+struct buffer_copy {
+	buffer &src_buffer, &dst_buffer;
+	size_t src_offset, dst_offset, size;
+	buffer_copy(const buffer_copy &) = delete;
+	buffer_copy(buffer_copy &&) = default;
+	buffer_copy(buffer &src_buffer, buffer &dst_buffer, size_t src_offset = 0, size_t dst_offset = 0, size_t size = 0)
+		: src_buffer(src_buffer), dst_buffer(dst_buffer), src_offset(src_offset), dst_offset(dst_offset), size(size) {}
+};
+
+
 /**
  * A buffer that might be accessed from the CPU and GPU
  */
@@ -343,6 +398,24 @@ struct buffer {
 
 	buffer(buffer_access flags, std::string name = "")
 		: native(0), size(0), parent_context(nullptr), flags(flags), name(name) {}
+
+
+	/** Fill data from the array into the buffer */
+	template<typename T>
+	inline buffer_fill operator=(const T &a) {
+		return std::move( buffer_fill(*this, &a, sizeof(T)) );
+	}
+
+	template<typename T>
+	inline buffer_fill fill(const T &a, size_t size = 0, size_t offset = 0) {
+		return std::move( buffer_fill(*this, &a, sizeof(T), offset, sizeof(T) * size));
+	}
+
+	/** Copy data from one buffer to another */
+	inline buffer_copy operator=(buffer &other) {
+		return std::move( buffer_copy(other, *this) );
+	}
+
 };
 
 /** Output some info in human-readable format */
@@ -391,6 +464,13 @@ static inline buffer_read operator>>(buffer &b, std::array<T, n> &a) {
 	return std::move( buffer_read(b, &a[0], sizeof(T) * n) );
 }
 
+/** Read data from the buffer into the variable */
+template<typename T>
+static inline buffer_read operator>>(buffer &b, T &a) {
+	return std::move( buffer_read(b, &a, sizeof(T)) );
+}
+
+
 
 
 #if HAVE_AMD_FFT
@@ -406,16 +486,27 @@ struct fft {
 	fft(const fft &) = delete;
 	fft(fft &&) = default;
 
-	fft(size_t x) : lengths{x}, dim{CLFFT_1D} {}
-	fft(size_t x, size_t y) : lengths{x, y}, dim{CLFFT_2D} {}
-	fft(size_t x, size_t y, size_t z) : lengths{x, y, z}, dim{CLFFT_3D} {}
+	fft(size_t x) : native(0), parent_context(nullptr), lengths{x}, dim{CLFFT_1D} {}
+	fft(size_t x, size_t y) : native(0), parent_context(nullptr), lengths{x, y}, dim{CLFFT_2D} {}
+	fft(size_t x, size_t y, size_t z) : native(0), parent_context(nullptr), lengths{x, y, z}, dim{CLFFT_3D} {}
+	fft(const std::vector<size_t> &s) : native(0), parent_context(nullptr) {
+		switch(s.size()) {
+			case 1: dim = CLFFT_1D; break;
+			case 2: dim = CLFFT_2D; break;
+			case 3: dim = CLFFT_3D; break;
+			default: throw std::runtime_error("Only supports 1-3D transformations.");
+		}
+		std::copy(s.begin(), s.end(), lengths);
+	}
 	~fft();
 
 	/** Run a forward FFT. */
 	fft_run forward(buffer &in, buffer &out);
+	fft_run forward(buffer &inout);
 
 	/** Run a backward FFT. */
 	fft_run backward(buffer &in, buffer &out);
+	fft_run backward(buffer &inout);
 };
 
 /**

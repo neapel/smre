@@ -1,6 +1,7 @@
 #ifndef __CHAMBOLLE_POCK_H__
 #define __CHAMBOLLE_POCK_H__
 
+#include "config.h"
 #include "multi_array.h"
 #include <vector>
 #include <functional>
@@ -20,10 +21,11 @@ struct constraint {
 };
 
 struct debug_state {
-	const boost::multi_array<float, 2> &img;
+	boost::multi_array<float, 2> img;
 	std::string name;
 	int n, i;
 	float tau, sigma, theta;
+	debug_state(boost::multi_array<float, 2> img, std::string name = "", int n = -1, int i = -1, float tau = -1, float sigma = -1, float theta = -1) : img(img), name(name), n(n), i(i), tau(tau), sigma(sigma), theta(theta) {}
 };
 
 
@@ -53,11 +55,21 @@ struct chambolle_pock {
 	std::vector<std::shared_ptr<constraint>> constraints;
 	std::vector<debug_state> debug_log;
 	bool debug;
+	bool opencl;
 
 	chambolle_pock()
-	: max_steps(10), tau(50), sigma(1), gamma(1) {}
+	: max_steps(10), tau(50), sigma(1), gamma(1), constraints(), debug_log(), debug(false), opencl(false) {}
 
-	boost::multi_array<float, 2> run(const boost::multi_array<float, 2> &);
+	boost::multi_array<float, 2> run(const boost::multi_array<float, 2> &input) {
+#if HAVE_OPENCL
+		return opencl ? run_cl(input) : run_cpu(input);
+#else
+		return run_cpu(input)
+#endif
+
+	}
+
+	boost::multi_array<float, 2> run_cpu(const boost::multi_array<float, 2> &);
 
 #if HAVE_OPENCL
 	boost::multi_array<float, 2> run_cl(const boost::multi_array<float, 2> &);

@@ -1,7 +1,6 @@
 #include <gtkmm.h>
 #include <iostream>
 #include <memory>
-#include <boost/program_options.hpp>
 #include <boost/regex.hpp>
 #include <stdexcept>
 #include <boost/format.hpp>
@@ -31,19 +30,31 @@ boost::multi_array<float, 2> pixbuf_to_multi_array(const RefPtr<Pixbuf> &pb) {
 }
 
 // Copy multi_array data [-1:1] into a new pixbuf [0:255]
-RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a, bool mark_outliers = true) {
+// mark_outliers: <-1 = red, >1 = blue, exactly 0 = green
+RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 	auto h = a.shape()[0], w = a.shape()[1];
 	auto pb = Pixbuf::create(COLORSPACE_RGB, false, 8, w, h);
 	auto px = pb->get_pixels();
 	auto stride = pb->get_rowstride();
+	auto high = max(a), low = min(a);
 	for(size_t y = 0 ; y != h ; y++)
 		for(size_t x = 0 ; x != w ; x++) {
-			int value = 255 * (a[y][x] + 1) / 2;
-			if(!mark_outliers) value = max(0, min(255, value));
 			auto p = px + (y * stride + 3 * x);
-			if(value > 255) { p[0] = p[1] = 0; p[2] = 255; }
-			else if(value < 0) { p[0] = 255; p[1] = p[2] = 0; }
-			else { p[0] = p[1] = p[2] = value; }
+#if 1
+			p[0] = p[1] = p[2] = high == low
+				? 0
+				: 255 * (a[y][x] - low) / (high - low);
+#else
+			auto f_val = a[y][x];
+			if(mark_outliers && f_val == 0) { p[0] = p[2] = 0; p[1] = 200; }
+			else {
+				int value = 255 * (f_val + 1) / 2;
+				if(!mark_outliers) value = max(0, min(255, value));
+				if(value > 255) { p[0] = p[1] = 0; p[2] = 255; }
+				else if(value < 0) { p[0] = 255; p[1] = p[2] = 0; }
+				else { p[0] = p[1] = p[2] = value; }
+			}
+#endif
 		}
 	return pb;
 }
@@ -59,6 +70,18 @@ struct user_constraint : constraint {
 		return kernel_from_string(expr)(w, h);
 	};
 };
+
+
+template<typename T, typename W>
+void connect(T &value, W &w) {
+	w.set_value(value);
+	w.signal_value_changed().connect([&]{ value = w.get_value(); });
+}
+
+void connect(bool &value, RefPtr<ToggleAction> &action) {
+	action->set_active(value);
+	action->signal_toggled().connect([&]{ value = action->get_active(); });
+}
 
 
 struct main_window : Gtk::ApplicationWindow {
@@ -80,18 +103,18 @@ struct main_window : Gtk::ApplicationWindow {
 	TreeView constraints_view;
 
 	struct cs : TreeModel::ColumnRecord {
-		TreeModelColumn<RefPtr<Pixbuf>> img;
+		TreeModelColumn<RefPtr<Pixbuf>> img, old_img;
 		TreeModelColumn<string> name;
-		TreeModelColumn<string> n, i;
-		TreeModelColumn<string> tau, sigma, theta;
-		cs() { add(img); add(name); add(n); add(i); add(tau); add(sigma); add(theta); }
+		cs() { add(img); add(old_img); add(name); }
 	} steps_columns;
-	RefPtr<TreeStore> steps_model;
+	RefPtr<ListStore> steps_model;
 	TreeView steps_view;
 
 	Menu constraints_menu;
 	RefPtr<Action> add_constraint, remove_constraint, load_image, run;
+	RefPtr<ToggleAction> use_cl, use_debug;
 
+	vector<debug_state> current_log, previous_log;
 	Dispatcher algorithm_done;
 
 	main_window(chambolle_pock &p)
@@ -102,12 +125,14 @@ struct main_window : Gtk::ApplicationWindow {
 	  max_steps_value{Adjustment::create(p.max_steps, 1, 100)},
 	  constraints_model{ListStore::create(constraints_columns)},
 	  constraints_view{constraints_model},
-	  steps_model{TreeStore::create(steps_columns)},
+	  steps_model{ListStore::create(steps_columns)},
 	  steps_view{steps_model},
 	  add_constraint{Action::create("add_constraint", Stock::ADD, "_Add Constraint")},
 	  remove_constraint{Action::create("remove_constraint", Stock::REMOVE, "Remo_ve Constraint")},
 	  load_image{Action::create("load_image", Stock::OPEN, "_Load Image")},
-	  run{Action::create("run", Stock::EXECUTE, "_Run Chambolle-Pock")}
+	  run{Action::create("run", Stock::EXECUTE, "_Run Chambolle-Pock")},
+	  use_cl{ToggleAction::create("use_cl", Stock::CONNECT, "Use OpenCL")},
+	  use_debug{ToggleAction::create("use_cl", Stock::PROPERTIES, "Debug")}
 	{
 		// Main layout
 		auto vbox = manage(new VBox());
@@ -125,13 +150,19 @@ struct main_window : Gtk::ApplicationWindow {
 		run->signal_activate().connect([&]{do_run();});
 		toolbar->append(*run->create_tool_item());
 
+		use_cl->set_is_important(true);
+		toolbar->append(*use_cl->create_tool_item());
+
+		use_debug->set_is_important(true);
+		toolbar->append(*use_debug->create_tool_item());
+
 		// Main area
-		auto paned = manage(new Paned());
+		auto paned = manage(new HBox());
 		vbox->pack_start(*paned);
 
 		// Options
 		auto left_pane = manage(new VBox());
-		paned->pack1(*left_pane, SHRINK);
+		paned->pack_start(*left_pane, PACK_SHRINK);
 		auto options = manage(new Grid());
 		left_pane->pack_start(*options, PACK_SHRINK);
 		options->set_border_width(10);
@@ -150,11 +181,12 @@ struct main_window : Gtk::ApplicationWindow {
 		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
 
 		// Connect to model
-		#define connect_value(val, var) val.signal_value_changed().connect([&]{var = val.get_value();})
-		connect_value(tau_value, p.tau);
-		connect_value(gamma_value, p.gamma);
-		connect_value(sigma_value, p.sigma);
-		connect_value(max_steps_value, p.max_steps);
+		connect(p.tau, tau_value);
+		connect(p.gamma, gamma_value);
+		connect(p.sigma, sigma_value);
+		connect(p.max_steps, max_steps_value);
+		connect(p.opencl, use_cl);
+		connect(p.debug, use_debug);
 
 		// Constraints Table
 		for(auto cons : p.constraints) {
@@ -193,7 +225,7 @@ struct main_window : Gtk::ApplicationWindow {
 		constraints_view.append_column_numeric_editable("b", constraints_columns.b, "%.2f");
 
 		// Output
-		paned->pack2(notebook);
+		paned->pack_start(notebook);
 		// Scroll-locked image views for comparison
 		auto original_scroll = manage(new ScrolledWindow());
 		original_scroll->add(original_image);
@@ -205,14 +237,9 @@ struct main_window : Gtk::ApplicationWindow {
 		auto scrolled_window = manage(new ScrolledWindow());
 		notebook.append_page(*scrolled_window, "Debug");
 		scrolled_window->add(steps_view);
-		steps_view.set_grid_lines(TREE_VIEW_GRID_LINES_VERTICAL);
 		steps_view.append_column("Description", steps_columns.name);
-		steps_view.append_column("n", steps_columns.n);
-		steps_view.append_column("i", steps_columns.i);
-		steps_view.append_column("τ", steps_columns.tau);
-		steps_view.append_column("σ", steps_columns.sigma);
-		steps_view.append_column("ϴ", steps_columns.theta);
 		steps_view.append_column("Image", steps_columns.img);
+		steps_view.append_column("Previous", steps_columns.old_img);
 
 		auto progress_b = manage(new ToolButton(progress));
 		progress_b->set_expand(true);
@@ -225,14 +252,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 		progress.hide();
 
-		algorithm_done.connect([&]{
-			// re-attach modified model
-			steps_view.set_model(steps_model);
-			steps_view.expand_all();
-			progress.stop();
-			progress.hide();
-			notebook.set_current_page(1); // output
-		});
+		algorithm_done.connect([&]{ on_algorithm_done(); });
 	}
 
 	// Select and load the image into a pixbuf.
@@ -251,10 +271,6 @@ struct main_window : Gtk::ApplicationWindow {
 
 	void open(RefPtr<Pixbuf> image) {
 		input_image = image;
-		steps_model->clear();
-		auto row = *steps_model->append();
-		row[steps_columns.img] = input_image;
-		row[steps_columns.name] = "Input";
 		original_image.set(input_image);
 		output_image.set(input_image);
 		run->set_sensitive(true);
@@ -278,48 +294,38 @@ struct main_window : Gtk::ApplicationWindow {
 			p.constraints.push_back(shared_ptr<constraint>(new user_constraint{a, b, ks}));
 		}
 
-		// Debug mode?
-		p.debug = notebook.get_current_page() == 2;
-		// detach model for modification in thread
-		if(p.debug) steps_view.unset_model();
-
 		// start thread
-		Threads::Thread::create([&]{
+		Threads::Thread::create([=/* & doesn't work with threads */]{
 			// The image to process
 			auto input = pixbuf_to_multi_array(input_image);
 
 			// run
 			auto run_p = p;
 			auto result = run_p.run(input);
-			output_image.set(multi_array_to_pixbuf(result));
-
 			if(p.debug) {
-				int previous_step = -1;
-				steps_model->clear();
-				auto step_row = steps_model->append();
-				auto input_row = step_row;
-				(*input_row)[steps_columns.img] = input_image;
-				(*input_row)[steps_columns.name] = "Input";
-				for(auto l : run_p.debug_log) {
-					if(l.n != previous_step) {
-						previous_step = l.n;
-						step_row = steps_model->append(input_row->children());
-						(*step_row)[steps_columns.name] = "Step";
-						(*step_row)[steps_columns.n] = boost::lexical_cast<string>(l.n);
-					}
-					auto row = *steps_model->append(step_row->children());
-					row[steps_columns.img] = multi_array_to_pixbuf(l.img);
-					row[steps_columns.name] = l.name;
-					row[steps_columns.n] = boost::lexical_cast<string>(l.n);
-					if(l.i >= 0) row[steps_columns.i] = boost::lexical_cast<string>(l.i);
-					if(l.tau != -1) row[steps_columns.tau] = boost::lexical_cast<string>(l.tau);
-					if(l.sigma != -1) row[steps_columns.sigma] = boost::lexical_cast<string>(l.sigma);
-					if(l.theta != -1) row[steps_columns.theta] = boost::lexical_cast<string>(l.theta);
-				};
+				swap(current_log, previous_log);
+				current_log = run_p.debug_log;
 			}
+			output_image.set(multi_array_to_pixbuf(result));
 
 			algorithm_done();
 		});
+	}
+
+	void on_algorithm_done() {
+		if(p.debug) {
+			steps_model->clear();
+			for(size_t i = 0 ; i < current_log.size() ; i++) {
+				auto row = *steps_model->append();
+				row[steps_columns.name] = current_log[i].name;
+				row[steps_columns.img] = multi_array_to_pixbuf(current_log[i].img);
+				if(current_log.size() == previous_log.size())
+					row[steps_columns.old_img] = multi_array_to_pixbuf(previous_log[i].img);
+			}
+		}
+		progress.stop();
+		progress.hide();
+		notebook.set_current_page(p.debug ? 2 : 1); // output
 	}
 
 };
@@ -367,6 +373,8 @@ struct app_t : Gtk::Application {
 		group.add_entry(entry("sigma", "initial value for sigma"), (double&)p.sigma);
 		group.add_entry(entry("gamma", "initial value for gamma"), (double&)p.gamma);
 		group.add_entry(entry("steps", "number of iteration steps"), (int&)p.max_steps);
+		group.add_entry(entry("opencl", "use opencl implementation"), p.opencl);
+		group.add_entry(entry("debug", "enable debug output"), p.debug);
 
 		group.add_entry(entry("constraint", "kernels 'box:SIZE[,A,B]' or 'gauss:SIGMA[,A,B]'"),
 			mem_fun(*this, &app_t::parse_constraint));
@@ -397,7 +405,7 @@ struct app_t : Gtk::Application {
 			auto input = pixbuf_to_multi_array(input_image);
 			auto run_p = p;
 			auto output = run_p.run(input);
-			multi_array_to_pixbuf(output, false)->save(output_file, "png");
+			multi_array_to_pixbuf(output)->save(output_file, "png");
 		} else {
 			cmd->printerr("When using --output, you must specify an input image, too.");
 			return EXIT_FAILURE;

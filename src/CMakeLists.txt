@@ -7,6 +7,7 @@ set(BASE_SRC
 		gil_io.cpp
 	opencl_helpers.cpp
 	chambolle_pock.cpp
+	chambolle_pock_cl.cpp
 )
 
 add_library(smre SHARED ${BASE_SRC})
