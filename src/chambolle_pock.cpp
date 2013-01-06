@@ -72,6 +72,9 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 	sigma /= tau * total_norm;
 	cerr << "total norm = " << total_norm << endl;
 
+	// If needed, calculate `q` value.
+	const float q = 1; // TODO
+
 	// Repeat until good enough.
 	for(size_t n = 0 ; n < max_steps ; n++) {
 		// reset accumulator
@@ -89,13 +92,13 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 					fft_conv[ix][iy] = fft_k[i][ix][iy] * fft_bar_x[ix][iy] * scale;
 			debug(real(fft_conv), "kernel * bar_x");
 			fftw::backward(fft_conv, convolved)();
-			debug(convolved, "backward fft", (int)n, (int)i, tau, sigma);
+			debug(convolved, "backward fft");
 
 			// calculate new y_i
 			for(size_t ix = 0 ; ix < width ; ix++)
 				for(size_t iy = 0 ; iy < height ; iy++)
-					y[i][ix][iy] = clamp(y[i][ix][iy] + sigma * convolved[ix][iy], constraints[i]->a * sigma, constraints[i]->b * sigma);
-			debug(y[i], "new y", (int)n, (int)i, tau, sigma);
+					y[i][ix][iy] = clamp(y[i][ix][iy] + sigma * convolved[ix][iy], -q * sigma, q * sigma);
+			debug(y[i], "new y");
 
 			// convolve y_i with conjugate transpose of kernel
 			fftw::forward(y[i], fft_conv)();
@@ -118,7 +121,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		for(size_t ix = 0 ; ix < width ; ix++)
 			for(size_t iy = 0 ; iy < height ; iy++)
 				x[ix][iy] = (x[ix][iy] - tau * w[ix][iy] + tau * Y[ix][iy]) / (1 + tau);
-		debug(x, "new_x: x - w + Y", (int)n, -1, tau, sigma);
+		debug(x, "new_x: x - w + Y");
 
 		// theta
 		const float theta = 1 / sqrt(1 + 2 * tau * gamma);
@@ -130,7 +133,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		for(size_t ix = 0 ; ix < width ; ix++)
 			for(size_t iy = 0 ; iy < height ; iy++)
 				bar_x[ix][iy] = x[ix][iy] + theta * (x[ix][iy] - old_x[ix][iy]);
-		debug(bar_x, "x̄: x - old_x", (int)n, -1, tau, sigma, theta);
+		debug(bar_x, "x̄: x - old_x");
 	}
 
 	debug(Y, "original");

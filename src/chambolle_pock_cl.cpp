@@ -206,6 +206,9 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 	sigma /= tau * total_norm;
 	cerr << "total norm = " << total_norm << endl;
 
+	// If needed, calculate `q` value.
+	const float q = 1; // TODO
+
 	// Repeat until good enough.
 	for(size_t n = 0 ; n < max_steps ; n++) {
 		// reset accumulator
@@ -224,8 +227,8 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 			debug_c(convolved, "backward fft");
 
 			// calculate new y_i
-			auto lo = constraints[i]->a * sigma;
-			auto hi = constraints[i]->b * sigma;
+			auto lo = -q * sigma;
+			auto hi = q * sigma;
 			seq = seq.then()( mul_add_clamp(y[i], y[i], convolved, sigma, lo, hi) );
 			debug_c(y[i], "new y");
 

@@ -9,13 +9,9 @@
 #include <memory>
 
 /**
- * One constraint: \f$ a \le (k * x)_w \le b \quad\forall w \in I \f$
+ * One constraint: \f$ -q \le (k * x)_w \le q \quad\forall w \in I \f$
  */
 struct constraint {
-	// clamp
-	float a, b;
-	constraint(float a, float b) : a(a), b(b) {}
-
 	// lazy generator
 	virtual boost::multi_array<float, 2> get_k(const boost::multi_array<float, 2> &) = 0;
 };
@@ -23,9 +19,7 @@ struct constraint {
 struct debug_state {
 	boost::multi_array<float, 2> img;
 	std::string name;
-	int n, i;
-	float tau, sigma, theta;
-	debug_state(boost::multi_array<float, 2> img, std::string name = "", int n = -1, int i = -1, float tau = -1, float sigma = -1, float theta = -1) : img(img), name(name), n(n), i(i), tau(tau), sigma(sigma), theta(theta) {}
+	debug_state(boost::multi_array<float, 2> img, std::string name = "") : img(img), name(name) {}
 };
 
 
@@ -51,7 +45,7 @@ struct debug_state {
  */
 struct chambolle_pock {
 	size_t max_steps;
-	float tau, sigma, gamma;
+	float alpha, tau, sigma, gamma;
 	std::vector<std::shared_ptr<constraint>> constraints;
 	std::vector<debug_state> debug_log;
 	bool debug;
@@ -64,9 +58,8 @@ struct chambolle_pock {
 #if HAVE_OPENCL
 		return opencl ? run_cl(input) : run_cpu(input);
 #else
-		return run_cpu(input)
+		return run_cpu(input);
 #endif
-
 	}
 
 	boost::multi_array<float, 2> run_cpu(const boost::multi_array<float, 2> &);

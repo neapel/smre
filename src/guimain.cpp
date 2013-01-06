@@ -63,7 +63,7 @@ RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 struct user_constraint : constraint {
 	string expr;
 
-	user_constraint(float a, float b, string e) : constraint{a, b}, expr(e) {}
+	user_constraint(string e) : expr(e) {}
 
 	boost::multi_array<float, 2> get_k(const boost::multi_array<float, 2> &img) {
 		auto h = img.shape()[0], w = img.shape()[1];
@@ -88,16 +88,15 @@ struct main_window : Gtk::ApplicationWindow {
 	chambolle_pock &p;
 	RefPtr<Pixbuf> input_image;
 
-	SpinButton tau_value, gamma_value, sigma_value, max_steps_value;
+	SpinButton alpha_value, tau_value, gamma_value, sigma_value, max_steps_value;
 	Statusbar statusbar;
 	Spinner progress;
 	Notebook notebook;
 	Image original_image, output_image;
 
 	struct cc : TreeModel::ColumnRecord {
-		TreeModelColumn<float> a, b;
 		TreeModelColumn<string> kernel;
-		cc() { add(a); add(b); add(kernel); }
+		cc() { add(kernel); }
 	} constraints_columns;
 	RefPtr<ListStore> constraints_model;
 	TreeView constraints_view;
@@ -119,6 +118,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 	main_window(chambolle_pock &p)
 	: p(p),
+	  alpha_value{Adjustment::create(p.alpha, 0, 1), 0, 2},
 	  tau_value{Adjustment::create(p.tau, 0, 1000), 0, 2},
 	  gamma_value{Adjustment::create(p.gamma, -5, 5), 0, 2},
 	  sigma_value{Adjustment::create(p.sigma, 0, 5), 0, 2},
@@ -181,6 +181,7 @@ struct main_window : Gtk::ApplicationWindow {
 		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
 
 		// Connect to model
+		connect(p.alpha, alpha_value);
 		connect(p.tau, tau_value);
 		connect(p.gamma, gamma_value);
 		connect(p.sigma, sigma_value);
@@ -191,14 +192,10 @@ struct main_window : Gtk::ApplicationWindow {
 		// Constraints Table
 		for(auto cons : p.constraints) {
 			auto row = *constraints_model->append();
-			row[constraints_columns.a] = cons->a;
-			row[constraints_columns.b] = cons->b;
 			row[constraints_columns.kernel] = dynamic_pointer_cast<user_constraint>(cons)->expr;
 		}
 		add_constraint->signal_activate().connect([&]{
 			auto row = *constraints_model->append();
-			row[constraints_columns.a] = -1;
-			row[constraints_columns.b] = 1;
 			row[constraints_columns.kernel] = "box:1";
 		});
 		toolbar->append(*add_constraint->create_tool_item());
@@ -221,8 +218,6 @@ struct main_window : Gtk::ApplicationWindow {
 
 		left_pane->pack_start(constraints_view);
 		constraints_view.append_column_editable("Kernel", constraints_columns.kernel);
-		constraints_view.append_column_numeric_editable("a", constraints_columns.a, "%.2f");
-		constraints_view.append_column_numeric_editable("b", constraints_columns.b, "%.2f");
 
 		// Output
 		paned->pack_start(notebook);
@@ -288,10 +283,8 @@ struct main_window : Gtk::ApplicationWindow {
 		// Actually create constraints now.
 		p.constraints.clear();
 		for(TreeRow r : constraints_model->children()) {
-			const auto a = r.get_value(constraints_columns.a);
-			const auto b = r.get_value(constraints_columns.b);
 			const auto ks = r.get_value(constraints_columns.kernel);
-			p.constraints.push_back(shared_ptr<constraint>(new user_constraint{a, b, ks}));
+			p.constraints.push_back(shared_ptr<constraint>(new user_constraint{ks}));
 		}
 
 		// start thread
@@ -350,17 +343,8 @@ struct app_t : Gtk::Application {
 	app_t() : Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE) {}
 
 	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
-		using namespace boost;
 		if(!has_value) return false;
-		static regex r("(?<kernel>[^,]+)"
-							"(,(?<a>-?\\d*\\.?\\d*)"
-							",(?<b>-?\\d*\\.?\\d*))?");
-		smatch m;
-		if(!regex_match(string(value), m, r)) return false;
-		const float a = m["a"].matched ? lexical_cast<float>(m["a"]) : -1;
-		const float b = m["b"].matched ? lexical_cast<float>(m["b"]) :  1;
-		auto kernel = m["kernel"];
-		p.constraints.push_back(std::shared_ptr<constraint>(new user_constraint{a, b, kernel}));
+		p.constraints.push_back(std::shared_ptr<constraint>(new user_constraint{value}));
 		return true;
 	}
 
