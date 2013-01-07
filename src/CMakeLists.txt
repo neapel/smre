@@ -7,11 +7,14 @@ set(BASE_SRC
 		gil_io.cpp
 	opencl_helpers.cpp
 	chambolle_pock.cpp
-	chambolle_pock_cl.cpp
+		chambolle_pock_cl.cpp
+		chambolle_pock_cpu.cpp
 )
 
-add_library(smre SHARED ${BASE_SRC})
-#require_libraries(smre)
+if(BUILD_TESTING)
+	add_library(smre SHARED ${BASE_SRC})
+	#require_libraries(smre)
+endif()
 
 
 # Executables using that library

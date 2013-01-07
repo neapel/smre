@@ -65,7 +65,7 @@ endif()
 
 # Boost libraries
 find_package(Boost
-	COMPONENTS program_options regex
+	COMPONENTS program_options regex filesystem system
 	REQUIRED)
 if(Boost_FOUND)
 	include_directories(${Boost_INCLUDE_DIRS})
@@ -126,10 +126,8 @@ endmacro()
 
 # General compiler flags
 if(CMAKE_COMPILER_IS_GNUCXX)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra --std=c++0x")
-	add_definitions(-Wall -Wextra --std=c++0x)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra --std=c++0x -fopenmp")
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3")
-	add_definitions(-g3)
 endif()
 
 require_source_compiles("

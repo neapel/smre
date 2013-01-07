@@ -7,7 +7,6 @@
 #include "config.h"
 
 #include "chambolle_pock.h"
-#include "kernel_generator.h"
 
 using namespace std;
 using namespace Gtk;
@@ -60,32 +59,10 @@ RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 }
 
 
-struct user_constraint : constraint {
-	string expr;
-
-	user_constraint(string e) : expr(e) {}
-
-	boost::multi_array<float, 2> get_k(const boost::multi_array<float, 2> &img) {
-		auto h = img.shape()[0], w = img.shape()[1];
-		return kernel_from_string(expr)(w, h);
-	};
-};
-
-
-template<typename T, typename W>
-void connect(T &value, W &w) {
-	w.set_value(value);
-	w.signal_value_changed().connect([&]{ value = w.get_value(); });
-}
-
-void connect(bool &value, RefPtr<ToggleAction> &action) {
-	action->set_active(value);
-	action->signal_toggled().connect([&]{ value = action->get_active(); });
-}
 
 
 struct main_window : Gtk::ApplicationWindow {
-	chambolle_pock &p;
+	chambolle_pock *p;
 	RefPtr<Pixbuf> input_image;
 
 	SpinButton alpha_value, tau_value, gamma_value, sigma_value, max_steps_value;
@@ -116,13 +93,13 @@ struct main_window : Gtk::ApplicationWindow {
 	vector<debug_state> current_log, previous_log;
 	Dispatcher algorithm_done;
 
-	main_window(chambolle_pock &p)
+	main_window(chambolle_pock *p)
 	: p(p),
-	  alpha_value{Adjustment::create(p.alpha, 0, 1), 0, 2},
-	  tau_value{Adjustment::create(p.tau, 0, 1000), 0, 2},
-	  gamma_value{Adjustment::create(p.gamma, -5, 5), 0, 2},
-	  sigma_value{Adjustment::create(p.sigma, 0, 5), 0, 2},
-	  max_steps_value{Adjustment::create(p.max_steps, 1, 100)},
+	  alpha_value{Adjustment::create(p->alpha, 0, 1), 0, 2},
+	  tau_value{Adjustment::create(p->tau, 0, 1000), 0, 2},
+	  gamma_value{Adjustment::create(p->gamma, -5, 5), 0, 2},
+	  sigma_value{Adjustment::create(p->sigma, 0, 5), 0, 2},
+	  max_steps_value{Adjustment::create(p->max_steps, 1, 100)},
 	  constraints_model{ListStore::create(constraints_columns)},
 	  constraints_view{constraints_model},
 	  steps_model{ListStore::create(steps_columns)},
@@ -181,22 +158,25 @@ struct main_window : Gtk::ApplicationWindow {
 		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
 
 		// Connect to model
-		connect(p.alpha, alpha_value);
-		connect(p.tau, tau_value);
-		connect(p.gamma, gamma_value);
-		connect(p.sigma, sigma_value);
-		connect(p.max_steps, max_steps_value);
-		connect(p.opencl, use_cl);
-		connect(p.debug, use_debug);
+		alpha_value.signal_value_changed().connect([&]{ p->alpha = alpha_value.get_value(); });
+		tau_value.signal_value_changed().connect([&]{ p->tau = tau_value.get_value(); });
+		gamma_value.signal_value_changed().connect([&]{ p->gamma = gamma_value.get_value(); });
+		sigma_value.signal_value_changed().connect([&]{ p->sigma = sigma_value.get_value(); });
+		max_steps_value.signal_value_changed().connect([&]{ p->max_steps = max_steps_value.get_value(); });
+
+		use_cl->set_active(p->opencl);
+		use_cl->signal_toggled().connect([&]{ p->opencl = use_cl->get_active(); });
+		use_debug->set_active(p->opencl);
+		use_debug->signal_toggled().connect([&]{ p->debug = use_debug->get_active(); });
 
 		// Constraints Table
-		for(auto cons : p.constraints) {
+		for(auto cons : p->constraints) {
 			auto row = *constraints_model->append();
-			row[constraints_columns.kernel] = dynamic_pointer_cast<user_constraint>(cons)->expr;
+			row[constraints_columns.kernel] = cons.expr;
 		}
 		add_constraint->signal_activate().connect([&]{
 			auto row = *constraints_model->append();
-			row[constraints_columns.kernel] = "box:1";
+			row[constraints_columns.kernel] = "box:3";
 		});
 		toolbar->append(*add_constraint->create_tool_item());
 		constraints_menu.append(*add_constraint->create_menu_item());
@@ -281,10 +261,10 @@ struct main_window : Gtk::ApplicationWindow {
 		progress.show();
 
 		// Actually create constraints now.
-		p.constraints.clear();
+		p->constraints.clear();
 		for(TreeRow r : constraints_model->children()) {
 			const auto ks = r.get_value(constraints_columns.kernel);
-			p.constraints.push_back(shared_ptr<constraint>(new user_constraint{ks}));
+			p->constraints.push_back(constraint(ks));
 		}
 
 		// start thread
@@ -293,9 +273,9 @@ struct main_window : Gtk::ApplicationWindow {
 			auto input = pixbuf_to_multi_array(input_image);
 
 			// run
-			auto run_p = p;
+			auto run_p = *p;
 			auto result = run_p.run(input);
-			if(p.debug) {
+			if(p->debug) {
 				swap(current_log, previous_log);
 				current_log = run_p.debug_log;
 			}
@@ -306,7 +286,7 @@ struct main_window : Gtk::ApplicationWindow {
 	}
 
 	void on_algorithm_done() {
-		if(p.debug) {
+		if(p->debug) {
 			steps_model->clear();
 			for(size_t i = 0 ; i < current_log.size() ; i++) {
 				auto row = *steps_model->append();
@@ -318,7 +298,7 @@ struct main_window : Gtk::ApplicationWindow {
 		}
 		progress.stop();
 		progress.hide();
-		notebook.set_current_page(p.debug ? 2 : 1); // output
+		notebook.set_current_page(p->debug ? 2 : 1); // output
 	}
 
 };
@@ -340,11 +320,11 @@ struct app_t : Gtk::Application {
 	// parameters.
 	chambolle_pock p;
 
-	app_t() : Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE) {}
+	app_t() : Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE), input_image(), main(NULL), p() {}
 
 	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
 		if(!has_value) return false;
-		p.constraints.push_back(std::shared_ptr<constraint>(new user_constraint{value}));
+		p.constraints.push_back(constraint{value});
 		return true;
 	}
 
@@ -353,20 +333,22 @@ struct app_t : Gtk::Application {
 		OptionContext ctx("[FILE]");
 		OptionGroup group("params", "default parameters", "longer");
 
-		group.add_entry(entry("tau", "initial value for tau"), (double&)p.tau);
-		group.add_entry(entry("sigma", "initial value for sigma"), (double&)p.sigma);
-		group.add_entry(entry("gamma", "initial value for gamma"), (double&)p.gamma);
-		group.add_entry(entry("steps", "number of iteration steps"), (int&)p.max_steps);
+		group.add_entry(entry("alpha", "initial value for alpha"), p.alpha);
+		group.add_entry(entry("tau", "initial value for tau"), p.tau);
+		group.add_entry(entry("sigma", "initial value for sigma"), p.sigma);
+		group.add_entry(entry("gamma", "initial value for gamma"), p.gamma);
+		group.add_entry(entry("steps", "number of iteration steps"), p.max_steps);
 		group.add_entry(entry("opencl", "use opencl implementation"), p.opencl);
 		group.add_entry(entry("debug", "enable debug output"), p.debug);
 
-		group.add_entry(entry("constraint", "kernels 'box:SIZE[,A,B]' or 'gauss:SIGMA[,A,B]'"),
+		group.add_entry(entry("constraint", "kernels 'box:SIZE' or 'gauss:SIGMA'"),
 			mem_fun(*this, &app_t::parse_constraint));
 
 		string output_file;
 		group.add_entry_filename(entry("output", "save output PNG here (runs without GUI)."), output_file);
 
 		ctx.set_main_group(group);
+		cerr << "C359 " << p.constraints.size() << endl;
 
 		// parse them
 		OptionGroup gtkgroup(gtk_get_option_group(true));
@@ -404,7 +386,7 @@ struct app_t : Gtk::Application {
 	}
 
 	void on_activate() {
-		main = new main_window(p);
+		main = new main_window(&p);
 		add_window(*main);
 		if(input_image) main->open(input_image);
 		main->show();

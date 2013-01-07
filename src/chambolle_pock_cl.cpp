@@ -169,7 +169,7 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 		seq = seq.then()( y[i].fill(float2(0), size_1d) );
 
 		// Get kernel
-		auto k = constraints[i]->get_k(x_in);
+		auto k = constraints[i].get_k(x_in);
 		const vector<size_t> k_size{k.shape()[0], k.shape()[1]};
 
 		// Pad and transform kernel
@@ -210,7 +210,7 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 	const float q = 1; // TODO
 
 	// Repeat until good enough.
-	for(size_t n = 0 ; n < max_steps ; n++) {
+	for(int n = 0 ; n < max_steps ; n++) {
 		// reset accumulator
 		seq = seq.then()( w = 0.0f );
 

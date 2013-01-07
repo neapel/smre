@@ -7,13 +7,18 @@
 #include <functional>
 #include <string>
 #include <memory>
+#include <iostream>
 
 /**
  * One constraint: \f$ -q \le (k * x)_w \le q \quad\forall w \in I \f$
  */
 struct constraint {
+	std::string expr;
+	constraint(std::string expr = "") : expr(expr) {}
+	constraint(const constraint &other) : expr(other.expr) {}
+
 	// lazy generator
-	virtual boost::multi_array<float, 2> get_k(const boost::multi_array<float, 2> &) = 0;
+	boost::multi_array<float, 2> get_k(const boost::multi_array<float, 2> &);
 };
 
 struct debug_state {
@@ -44,15 +49,15 @@ struct debug_state {
  * 	\f}
  */
 struct chambolle_pock {
-	size_t max_steps;
-	float alpha, tau, sigma, gamma;
-	std::vector<std::shared_ptr<constraint>> constraints;
+	int max_steps, monte_carlo_steps;
+	double alpha, tau, sigma, gamma;
+	std::vector<constraint> constraints;
 	std::vector<debug_state> debug_log;
 	bool debug;
 	bool opencl;
 
 	chambolle_pock()
-	: max_steps(10), tau(50), sigma(1), gamma(1), constraints(), debug_log(), debug(false), opencl(false) {}
+	: max_steps(10), monte_carlo_steps(1000), alpha(0.5), tau(50), sigma(1), gamma(1), constraints(), debug_log(), debug(false), opencl(false) {}
 
 	boost::multi_array<float, 2> run(const boost::multi_array<float, 2> &input) {
 #if HAVE_OPENCL
@@ -67,6 +72,10 @@ struct chambolle_pock {
 #if HAVE_OPENCL
 	boost::multi_array<float, 2> run_cl(const boost::multi_array<float, 2> &);
 #endif
+
+	// tries to load the cached value for `q`
+	// if not found, calculates it and saves the result.
+	float cached_q(std::array<size_t, 2>, std::function<std::vector<float>()>);
 };
 
 
