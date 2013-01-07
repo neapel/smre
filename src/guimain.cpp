@@ -62,7 +62,7 @@ RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 
 
 struct main_window : Gtk::ApplicationWindow {
-	chambolle_pock *p;
+	chambolle_pock *const p;
 	RefPtr<Pixbuf> input_image;
 
 	SpinButton alpha_value, tau_value, gamma_value, sigma_value, max_steps_value;
@@ -158,16 +158,16 @@ struct main_window : Gtk::ApplicationWindow {
 		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
 
 		// Connect to model
-		alpha_value.signal_value_changed().connect([&]{ p->alpha = alpha_value.get_value(); });
-		tau_value.signal_value_changed().connect([&]{ p->tau = tau_value.get_value(); });
-		gamma_value.signal_value_changed().connect([&]{ p->gamma = gamma_value.get_value(); });
-		sigma_value.signal_value_changed().connect([&]{ p->sigma = sigma_value.get_value(); });
-		max_steps_value.signal_value_changed().connect([&]{ p->max_steps = max_steps_value.get_value(); });
+		alpha_value.signal_value_changed().connect([=]{ p->alpha = alpha_value.get_value(); });
+		tau_value.signal_value_changed().connect([=]{ p->tau = tau_value.get_value(); });
+		gamma_value.signal_value_changed().connect([=]{ p->gamma = gamma_value.get_value(); });
+		sigma_value.signal_value_changed().connect([=]{ p->sigma = sigma_value.get_value(); });
+		max_steps_value.signal_value_changed().connect([=]{ p->max_steps = max_steps_value.get_value(); });
 
 		use_cl->set_active(p->opencl);
-		use_cl->signal_toggled().connect([&]{ p->opencl = use_cl->get_active(); });
+		use_cl->signal_toggled().connect([=]{ p->opencl = use_cl->get_active(); });
 		use_debug->set_active(p->opencl);
-		use_debug->signal_toggled().connect([&]{ p->debug = use_debug->get_active(); });
+		use_debug->signal_toggled().connect([=]{ p->debug = use_debug->get_active(); });
 
 		// Constraints Table
 		for(auto cons : p->constraints) {
@@ -318,13 +318,13 @@ struct app_t : Gtk::Application {
 	main_window *main;
 
 	// parameters.
-	chambolle_pock p;
+	chambolle_pock *p;
 
-	app_t() : Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE), input_image(), main(NULL), p() {}
+	app_t() : Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE), input_image(), main(NULL), p(new chambolle_pock()) {}
 
 	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
 		if(!has_value) return false;
-		p.constraints.push_back(constraint{value});
+		p->constraints.push_back(constraint{value});
 		return true;
 	}
 
@@ -333,13 +333,14 @@ struct app_t : Gtk::Application {
 		OptionContext ctx("[FILE]");
 		OptionGroup group("params", "default parameters", "longer");
 
-		group.add_entry(entry("alpha", "initial value for alpha"), p.alpha);
-		group.add_entry(entry("tau", "initial value for tau"), p.tau);
-		group.add_entry(entry("sigma", "initial value for sigma"), p.sigma);
-		group.add_entry(entry("gamma", "initial value for gamma"), p.gamma);
-		group.add_entry(entry("steps", "number of iteration steps"), p.max_steps);
-		group.add_entry(entry("opencl", "use opencl implementation"), p.opencl);
-		group.add_entry(entry("debug", "enable debug output"), p.debug);
+		group.add_entry(entry("alpha", "initial value for alpha"), p->alpha);
+		group.add_entry(entry("tau", "initial value for tau"), p->tau);
+		group.add_entry(entry("sigma", "initial value for sigma"), p->sigma);
+		group.add_entry(entry("gamma", "initial value for gamma"), p->gamma);
+		group.add_entry(entry("steps", "number of iteration steps"), p->max_steps);
+		group.add_entry(entry("opencl", "use opencl implementation"), p->opencl);
+		group.add_entry(entry("no-cache", "don't use the monte carlo cache"), p->no_cache);
+		group.add_entry(entry("debug", "enable debug output"), p->debug);
 
 		group.add_entry(entry("constraint", "kernels 'box:SIZE' or 'gauss:SIGMA'"),
 			mem_fun(*this, &app_t::parse_constraint));
@@ -369,7 +370,7 @@ struct app_t : Gtk::Application {
 		else if(input_image) {
 			// CLI mode.
 			auto input = pixbuf_to_multi_array(input_image);
-			auto run_p = p;
+			auto run_p = *p;
 			auto output = run_p.run(input);
 			multi_array_to_pixbuf(output)->save(output_file, "png");
 		} else {
@@ -386,7 +387,7 @@ struct app_t : Gtk::Application {
 	}
 
 	void on_activate() {
-		main = new main_window(&p);
+		main = new main_window(p);
 		add_window(*main);
 		if(input_image) main->open(input_image);
 		main->show();

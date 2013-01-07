@@ -53,11 +53,10 @@ struct chambolle_pock {
 	double alpha, tau, sigma, gamma;
 	std::vector<constraint> constraints;
 	std::vector<debug_state> debug_log;
-	bool debug;
-	bool opencl;
+	bool debug, opencl, no_cache;
 
 	chambolle_pock()
-	: max_steps(10), monte_carlo_steps(1000), alpha(0.5), tau(50), sigma(1), gamma(1), constraints(), debug_log(), debug(false), opencl(false) {}
+	: max_steps(10), monte_carlo_steps(1000), alpha(0.5), tau(50), sigma(1), gamma(1), constraints(), debug_log(), debug(false), opencl(false), no_cache(false) {}
 
 	boost::multi_array<float, 2> run(const boost::multi_array<float, 2> &input) {
 #if HAVE_OPENCL

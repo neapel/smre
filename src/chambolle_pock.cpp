@@ -31,7 +31,7 @@ float chambolle_pock::cached_q(std::array<size_t, 2> size, function<vector<float
 	create_directories(cache_dir);
 
 	vector<float> qs;
-	if(!exists(quant_target)) {
+	if(no_cache || !exists(quant_target)) {
 		// simulate
 		qs = calc();
 		sort(qs.begin(), qs.end());
