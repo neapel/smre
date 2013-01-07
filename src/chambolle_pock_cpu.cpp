@@ -13,7 +13,10 @@ inline float clamp(float x, float low, float high) {
 }
 
 #define debug(...) \
-	if(debug) debug_log.push_back(debug_state(__VA_ARGS__));
+	if(debug) { \
+		_Pragma("omp critical") \
+		debug_log.push_back(debug_state(__VA_ARGS__)); \
+	}
 
 multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in) {
 	assert(sigma > 0);
@@ -34,18 +37,23 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 	multi_array<float, 2> bar_x = x, w(size), convolved(size), dx(size), Y = x, padded_kernel(size);
 	multi_array<complex<float>, 2> fft_bar_x(c_size), fft_conv(c_size);
 	vector<multi_array<float, 2>> y;
+	vector<multi_array<complex<float>, 2>> fft_k, fft_conj_k;
+	for(size_t i = 0 ; i < N ; i++) {
+		y.push_back(multi_array<float, 2>(size));
+		fft_k.push_back(multi_array<complex<float>, 2>(size));
+		fft_conj_k.push_back(multi_array<complex<float>, 2>(size));
+	}
+
+	auto forward = fftw::forward(bar_x, fft_bar_x); // size -> c_size
+	auto backward = fftw::backward(fft_bar_x, bar_x); // c_size -> size
 
 	debug(x, "x: initial");
 	debug(Y, "Y: keep");
 
 	// Preprocess the kernels, i.e. pad and apply fourier transform.
-	vector<multi_array<complex<float>, 2>> fft_k, fft_conj_k;
 	float total_norm = 0;
+	#pragma omp parallel for reduction(+:total_norm)
 	for(size_t i = 0 ; i < N ; i++) {
-		y.push_back(multi_array<float, 2>(size));
-		fft_k.push_back(multi_array<complex<float>, 2>(size));
-		fft_conj_k.push_back(multi_array<complex<float>, 2>(size));
-
 		// Get kernel
 		auto k = constraints[i].get_k(x_in);
 
@@ -54,7 +62,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		fill(padded_kernel, 0);
 		kernel_pad(k, padded_kernel);
 		debug(padded_kernel, "kernel padded");
-		fftw::forward(padded_kernel, fft_k[i])();
+		forward(padded_kernel, fft_k[i]);
 		debug(real(fft_k[i]), "forward fft");
 
 		// Calculate max norm of transformed kernel
@@ -68,7 +76,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		fill(padded_kernel, 0);
 		kernel_pad(t, padded_kernel, true);
 		debug(padded_kernel, "conjtransp padded");
-		fftw::forward(padded_kernel, fft_conj_k[i])();
+		forward(padded_kernel, fft_conj_k[i]);
 		debug(real(fft_conj_k[i]), "forward fft");
 	}
 	// Adjust sigma with norm.
@@ -78,36 +86,30 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 
 	// If needed, calculate `q` value.
 	const float q = cached_q(size, [&]{
+		cerr << "monte carlo sim, " << monte_carlo_steps << " steps" << endl;
 		vector<float> qs;
 		#pragma omp parallel
 		{
 			multi_array<float, 2> data(size), convolved(size);
 			multi_array<complex<float>, 2> fft_data(c_size), fft_conv(c_size);
-			fftw::plan forward, backward;
-			#pragma omp critical
-			{
-				forward = move(fftw::forward(data, fft_data));
-				backward = fftw::backward(fft_conv, convolved);
-			}
-
 			// run Monte Carlo simulation
 			random_device dev;
 			mt19937 gen(dev());
 			normal_distribution<float> dist(/*mean*/0, /*stddev*/sigma);
 			#pragma omp for
-			for(size_t i = 0 ; i < monte_carlo_steps ; i++) {
+			for(int i = 0 ; i < monte_carlo_steps ; i++) {
 				// random image
 				for(size_t ix = 0 ; ix < width ; ix++)
 					for(size_t iy = 0 ; iy < height ; iy++)
 						data[ix][iy] = dist(gen);
-				forward();
+				forward(data, fft_data);
 				// convolute with each kernel, find max value.
 				float that_q = 0;
 				for(size_t i = 0 ; i < N ; i++) {
 					for(size_t ix = 0 ; ix < c_width ; ix++)
 						for(size_t iy = 0 ; iy < c_height ; iy++)
 							fft_conv[ix][iy] = fft_k[i][ix][iy] * fft_data[ix][iy] * scale;
-					backward();
+					backward(fft_conv, convolved);
 					for(size_t ix = 0 ; ix < width ; ix++)
 						for(size_t iy = 0 ; iy < height ; iy++)
 							that_q = max(that_q, convolved[ix][iy]);
@@ -115,8 +117,6 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 				// save to main thread
 				#pragma omp critical
 				qs.push_back(that_q);
-				if(omp_get_thread_num() == 0)
-				cerr << "calculating q: " << i << '/' << monte_carlo_steps << " max=" << that_q << "  \r" << flush;
 			}
 		}
 		return qs;
@@ -129,17 +129,18 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		fill(w, 0);
 
 		// transform bar_x for convolutions
-		fftw::forward(bar_x, fft_bar_x)();
+		forward(bar_x, fft_bar_x);
 		debug(real(fft_bar_x), "forward fft bar_x");
 
 		// for each constraint
+		#pragma omp parallel for firstprivate(fft_conv, convolved)
 		for(size_t i = 0 ; i < N ; i++) {
 			// convolve bar_x with kernel
 			for(size_t ix = 0 ; ix < c_width ; ix++)
 				for(size_t iy = 0 ; iy < c_height ; iy++)
 					fft_conv[ix][iy] = fft_k[i][ix][iy] * fft_bar_x[ix][iy] * scale;
 			debug(real(fft_conv), "kernel * bar_x");
-			fftw::backward(fft_conv, convolved)();
+			backward(fft_conv, convolved);
 			debug(convolved, "backward fft");
 
 			// calculate new y_i
@@ -149,16 +150,17 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 			debug(y[i], "new y");
 
 			// convolve y_i with conjugate transpose of kernel
-			fftw::forward(y[i], fft_conv)();
+			forward(y[i], fft_conv);
 			debug(real(fft_conv), "y[i] forward fft");
 			for(size_t ix = 0 ; ix < c_width ; ix++)
 				for(size_t iy = 0 ; iy < c_height ; iy++)
 					fft_conv[ix][iy] *= fft_conj_k[i][ix][iy] * scale;
 			debug(real(fft_conv), "kernel' * y[i]");
-			fftw::backward(fft_conv, convolved)();
+			backward(fft_conv, convolved);
 			debug(convolved, "backward fft");
 
 			// accumulate
+			#pragma omp critical
 			w += convolved;
 			debug(w, "accumulate");
 		}
@@ -166,6 +168,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		auto old_x = x;
 
 		// new x
+		#pragma omp parallel for
 		for(size_t ix = 0 ; ix < width ; ix++)
 			for(size_t iy = 0 ; iy < height ; iy++)
 				x[ix][iy] = (x[ix][iy] - tau * w[ix][iy] + tau * Y[ix][iy]) / (1 + tau);
@@ -178,6 +181,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		sigma /= theta;
 
 		// new bar_x
+		#pragma omp parallel for
 		for(size_t ix = 0 ; ix < width ; ix++)
 			for(size_t iy = 0 ; iy < height ; iy++)
 				bar_x[ix][iy] = x[ix][iy] + theta * (x[ix][iy] - old_x[ix][iy]);

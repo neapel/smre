@@ -50,6 +50,7 @@ struct plan {
 			if(in.shape()[i] != out.shape()[i])
 				throw std::invalid_argument("Input and output arrays must be of same size.");
 
+		#pragma omp critical
 		p = fftwf_plan_dft(dims, shape.data(),
 			const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
 			reinterpret_cast<fftwf_complex *>(out.origin()), dir, flags);
@@ -67,6 +68,7 @@ struct plan {
 			if(in.shape()[i] != out.shape()[i])
 				throw std::invalid_argument("Other dimensions must be same size.");
 
+		#pragma omp critical
 		p = fftwf_plan_dft_r2c(dims, shape.data(), const_cast<float *>(in.origin()),
 				reinterpret_cast<fftwf_complex *>(out.origin()), flags);
 	}
@@ -83,17 +85,37 @@ struct plan {
 			if(in.shape()[i] != out.shape()[i])
 				throw std::invalid_argument("Other dimensions must be same size.");
 
+		#pragma omp critical
 		p = fftwf_plan_dft_c2r(dims, shape.data(),
 				const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
 				out.origin(), flags);
 	}
 
+	/** Execute the plan with the original arrays */
 	void operator()() {
 		fftwf_execute(p);
 	}
 
+	/** Execute with new arrays. Must look exactly the same as the originals. */
+	template<size_t dims>
+	void operator()(const boost::multi_array<std::complex<float>, dims> &in, boost::multi_array<std::complex<float>, dims> &out) {
+		fftwf_execute_dft(p, const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())), reinterpret_cast<fftwf_complex *>(out.origin()));
+	}
+
+	template<size_t dims>
+	void operator()(const boost::multi_array<float, dims> &in, boost::multi_array<std::complex<float>, dims> &out) {
+		fftwf_execute_dft_r2c(p, const_cast<float *>(in.origin()), reinterpret_cast<fftwf_complex *>(out.origin()));
+	}
+
+	template<size_t dims>
+	void operator()(const boost::multi_array<std::complex<float>, dims> &in, boost::multi_array<float, dims> &out) {
+		fftwf_execute_dft_c2r(p, const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())), out.origin());
+	}
+
+	/** Destroy the plan. */
 	~plan() {
 		if(p != NULL)
+			#pragma omp critical
 			fftwf_destroy_plan(p);
 	}
 };
