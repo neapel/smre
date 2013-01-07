@@ -349,7 +349,6 @@ struct app_t : Gtk::Application {
 		group.add_entry_filename(entry("output", "save output PNG here (runs without GUI)."), output_file);
 
 		ctx.set_main_group(group);
-		cerr << "C359 " << p.constraints.size() << endl;
 
 		// parse them
 		OptionGroup gtkgroup(gtk_get_option_group(true));
