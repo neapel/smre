@@ -26,89 +26,7 @@ typedef complex<float> float2;
 
 using namespace boost;
 
-static string kernels = R"(
-	// real image -> complex image
-	__kernel void real2complex(__global float *input, __global float2 *output) {
-		const size_t i = get_global_id(0);
-		output[i].x = input[i];
-		output[i].y = 0;
-	}
-
-	// real kernel -> padded complex kernel
-	// place input in (0,0) corner of output.
-	__kernel void pad(__global float *input, __global float2 *output, uint ow) {
-		const size_t ky = get_global_id(0), kx = get_global_id(1);
-		const size_t kh = get_global_size(0), kw = get_global_size(1);
-		output[ow * ky + kx].x = input[kw * ky + kx];
-	}
-
-	// real kernel -> (conjugate) transposed padded complex kernel
-	// place transposed input in (h+2, w+2) corner of output.
-	__kernel void conjugate_transpose_pad(__global float *input, __global float2 *output, uint ow, uint oh) {
-		const size_t ky = get_global_id(0), kx = get_global_id(1);
-		const size_t kh = get_global_size(0), kw = get_global_size(1);
-		const size_t dx = ow - kw + 1, dy = oh - kh + 1;
-		output[ow * ((kx + dx) % ow) + ((ky + dy) % oh)].x = input[kw * kx + ky];
-	}
-
-	// find max(norm(x)) for x in data, write to output[0].
-	__kernel void reduce_max_norm(__global float2 *data, __global float *output) {
-		const size_t i = get_global_id(0);
-		output[i] = dot(data[i], data[i]);
-	}
-
-	// a * b
-	float2 _complex_mul(float2 a, float2 b) {
-		float2 out;
-		out.x = a.x * b.x - a.y * b.y;
-		out.y = a.x * b.y + a.y * b.x;
-		return out;
-	}
-
-	// Complex: out = a * b
-	__kernel void complex_mul(__global float2 *out, __global float2 *a, __global float2 *b) {
-		const size_t i = get_global_id(0);
-		out[i] = _complex_mul(a[i], b[i]);
-	}
-
-	// Real: out = a + b.
-	__kernel void add2v(__global float *out, __global float *a, __global float2 *b) {
-		const size_t i = get_global_id(0);
-		out[i] = a[i] + b[i].x;
-	}
-
-	// Real: out = a * as + b * bs + c * cs
-	__kernel void mul_add3vs(__global float *out, __global float *a, float as, __global float *b, float bs, __global float *c, float cs) {
-		const size_t i = get_global_id(0);
-		out[i] = a[i] * as + b[i] * bs + c[i] * cs;
-	}
-
-	// Real: out = a * as + b * bs
-	__kernel void mul_add2vs(__global float2 *out, __global float *a, float as, __global float *b, float bs) {
-		const size_t i = get_global_id(0);
-		out[i].x = a[i] * as + b[i] * bs;
-		out[i].y = 0;
-	}
-
-	// Real: out = a - b
-	__kernel void sub(__global float *out, __global float *a, __global float *b) {
-		const size_t i = get_global_id(0);
-		out[i] = a[i] - b[i];
-	}
-
-	float soft_clamp(float x, float lo, float hi) {
-		if(x < lo) return x - lo;
-		if(x > hi) return x - hi;
-		return 0;
-	}
-
-	// Real: out = [a + b * s]
-	__kernel void mul_add_clamp(__global float2 *out, __global float2 *a, __global float2 *b, float s, float lo, float hi) {
-		const size_t i = get_global_id(0);
-		out[i].x = soft_clamp(a[i].x + b[i].x * s, lo, hi);
-		out[i].y = 0;
-	}
-)";
+extern const char* chambolle_pock_kernels;
 
 
 multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) {
@@ -125,7 +43,7 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 	// const float scale = 1;
 
 	context ctx;
-	auto prog = ctx.compile(kernels);
+	auto prog = ctx.compile(chambolle_pock_kernels);
 	kernel(real2complex).size({size_1d});
 	kernel(pad);
 	kernel(conjugate_transpose_pad);
