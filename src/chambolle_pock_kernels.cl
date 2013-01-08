@@ -24,7 +24,9 @@ __kernel void conjugate_transpose_pad(__global float *input, __global float2 *ou
 
 
 
+#define R123_USE_U01_DOUBLE 0
 #include "random123/threefry.h"
+#include "random123/u01.h"
 typedef threefry2x32_key_t rand_k;
 typedef threefry2x32_ctr_t rand_c;
 #define rand(c,k) threefry2x32(c,k)
