@@ -67,7 +67,6 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 
 		// Calculate max norm of transformed kernel
 		auto normed = norm<float>(fft_k[i]);
-		debug(normed, "reduction");
 		total_norm += max(normed);
 
 		// Conjugate pad and transform kernel
@@ -112,7 +111,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 					backward(fft_conv, convolved);
 					for(size_t ix = 0 ; ix < width ; ix++)
 						for(size_t iy = 0 ; iy < height ; iy++)
-							that_q = max(that_q, convolved[ix][iy]);
+							that_q = max(that_q, abs(convolved[ix][iy]));
 				}
 				// save to main thread
 				#pragma omp critical
@@ -162,7 +161,6 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 			// accumulate
 			#pragma omp critical
 			w += convolved;
-			debug(w, "accumulate");
 		}
 
 		auto old_x = x;

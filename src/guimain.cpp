@@ -4,6 +4,7 @@
 #include <boost/regex.hpp>
 #include <stdexcept>
 #include <boost/format.hpp>
+#include <cmath>
 #include "config.h"
 
 #include "chambolle_pock.h"
@@ -43,6 +44,9 @@ RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 			p[0] = p[1] = p[2] = high == low
 				? 0
 				: 255 * (a[y][x] - low) / (high - low);
+			if(!isfinite(a[y][x])) {
+				p[0] = 255; p[1] = p[2] = 0;
+			}
 #else
 			auto f_val = a[y][x];
 			if(mark_outliers && f_val == 0) { p[0] = p[2] = 0; p[1] = 200; }
@@ -277,7 +281,7 @@ struct main_window : Gtk::ApplicationWindow {
 			auto result = run_p.run(input);
 			if(p->debug) {
 				swap(current_log, previous_log);
-				current_log = run_p.debug_log;
+				swap(current_log, run_p.debug_log);
 			}
 			output_image.set(multi_array_to_pixbuf(result));
 
@@ -292,7 +296,7 @@ struct main_window : Gtk::ApplicationWindow {
 				auto row = *steps_model->append();
 				row[steps_columns.name] = current_log[i].name;
 				row[steps_columns.img] = multi_array_to_pixbuf(current_log[i].img);
-				if(current_log.size() == previous_log.size())
+				if(i < previous_log.size())
 					row[steps_columns.old_img] = multi_array_to_pixbuf(previous_log[i].img);
 			}
 		}

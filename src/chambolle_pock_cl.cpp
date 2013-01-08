@@ -12,13 +12,13 @@ typedef complex<float> float2;
 
 #define debug_(bufname, desc, type, fun) \
 	if(debug) {\
-		multi_array<type, 2> data(size); \
-		ctx.wait(); cerr << "[DEBUG] "; ctx(bufname >> data).then().resume(); \
+		multi_array<type, 2> __data(size); \
+		ctx.wait(); cerr << "[DEBUG] "; ctx(bufname >> __data).then().resume(); \
 		debug_log.push_back(debug_state(fun, #bufname ": " desc)); \
 	}
 
-#define debug_r(bufname, desc) debug_(bufname, desc, float, data)
-#define debug_c(bufname, desc) debug_(bufname, desc, float2, real(data))
+#define debug_r(bufname, desc) debug_(bufname, desc, float, __data)
+#define debug_c(bufname, desc) debug_(bufname, desc, float2, real(__data))
 
 #define kernel(name) \
 	auto name = prog[#name]
@@ -54,6 +54,8 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 	kernel(mul_add2vs).size({size_1d});
 	kernel(mul_add_clamp).size({size_1d});
 	kernel(sub).size({size_1d});
+	kernel(random_fill).size({size_1d});
+	kernel(reduce_max_abs).size({1});
 
 	cl::fft fft(size_2d);
 
@@ -101,12 +103,7 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 
 		// Calculate max norm of transformed kernel
 		seq = seq.then()( reduce_max_norm(fft_k[i], max_norm) );
-		debug_r(max_norm, "reduction");
-		multi_array<float, 2> max_norm_a(size);
-		seq = seq.then()(max_norm >> max_norm_a);
-		seq.then().resume();
-		max_norm_v[i] = max(max_norm_a);
-		//seq = seq.then()( max_norm >> max_norm_v[i] );
+		seq = seq.then()( max_norm >> max_norm_v[i] );
 
 		// Conjugate pad and transform kernel
 		seq = seq.then()( fft_conj_k[i].fill(float2(0), size_1d) );
@@ -125,7 +122,40 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 	cerr << "total norm = " << total_norm << endl;
 
 	// If needed, calculate `q` value.
-	const float q = 1; // TODO
+	const float q = cached_q(size, [&]{
+		cerr << "monte carlo sim, " << monte_carlo_steps << " steps" << endl;
+		vector<float> qs;
+		buffer
+			data(sizeof(float2) * size_1d),
+			convolved(sizeof(float2) * size_1d),
+			absmax(sizeof(float) * size_1d);
+		random_device dev;
+		mt19937 gen(dev());
+		for(int i = 0 ; i < monte_carlo_steps ; i++) {
+			seq = seq.then()( random_fill(data, cl_uint(size_1d), cl_uint(gen()), float(sigma)) );
+			debug_c(data, "random data");
+			seq = seq.then()( fft.forward(data) );
+			debug_c(data, "forward fft'd");
+			float that_q = 0;
+			for(size_t j = 0 ; j < N ; j++) {
+				seq = seq.then()( complex_mul(convolved, data, fft_k[j]) );
+				seq = seq.then()( fft.backward(convolved) );
+				debug_c(convolved, "convolved");
+				seq = seq.then()( reduce_max_abs(convolved, cl_uint(size_1d), absmax) );
+				float kernel_q = -1;
+				seq = seq.then()( absmax >> kernel_q );
+				seq.then().resume();
+				that_q = max(that_q, kernel_q);
+				cerr << "step " << i << '/' << monte_carlo_steps << " kernel" << j << " kernel_q=" << kernel_q << endl;;
+			}
+			cerr << "step " << i << " q=" << that_q << endl;
+			qs.push_back(that_q);
+		}
+		seq.then().resume();
+		return qs;
+	});
+	cerr << "q = " << q << "   " << endl;
+
 
 	// Repeat until good enough.
 	for(int n = 0 ; n < max_steps ; n++) {
@@ -145,9 +175,8 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 			debug_c(convolved, "backward fft");
 
 			// calculate new y_i
-			auto lo = -q * sigma;
-			auto hi = q * sigma;
-			seq = seq.then()( mul_add_clamp(y[i], y[i], convolved, sigma, lo, hi) );
+			seq = seq.then()( mul_add_clamp(y[i], y[i], convolved,
+				float(sigma), float(-q * sigma), float(q * sigma)) );
 			debug_c(y[i], "new y");
 
 			// convolve y_i with conjugate transpose of kernel
@@ -159,13 +188,12 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 			debug_c(convolved, "backward fft");
 			
 			// accumulate
-			seq = seq.then()( add2v.args(w, w, convolved) );
-			debug_r(w, "accumulate");
+			seq = seq.then()( add2v(w, w, convolved) );
 		}
 
 		// new x
-		auto tau_ = 1 / (1 + tau), tau_tau = tau / (1 + tau), tau_tau_n = -tau_tau;
-		seq = seq.then()( mul_add3vs(new_x, x, tau_, w, tau_tau_n, Y, tau_tau) );
+		const float tau_tau = tau / (1 + tau);
+		seq = seq.then()( mul_add3vs(new_x, x, float(1 / (1 + tau)), w, -tau_tau, Y, tau_tau) );
 		debug_r(new_x, "x - w + Y");
 
 		// theta
@@ -175,8 +203,7 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 		sigma /= theta;
 
 		// new bar_x
-		auto theta1 = theta + 1, theta_n = -theta;
-		seq = seq.then()( mul_add2vs(bar_x, new_x, theta1, x, theta_n) );
+		seq = seq.then()( mul_add2vs(bar_x, new_x, theta + 1, x, -theta) );
 		debug_c(bar_x, "x - old_x");
 		seq = seq.then()( x = new_x );
 	}

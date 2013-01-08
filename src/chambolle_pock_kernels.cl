@@ -34,7 +34,10 @@ float2 rand_f(rand_c *c, rand_k k) {
 	c->v[0]++;
 	union {rand_c rc; uint2 ri;} res;
 	res.rc = rand(*c, k);
-	return (float2)(res.ri.x, res.ri.y) / 4294967296.0; /*2^32*/
+	float2 out;
+	out.x = u01_closed_closed_32_24(res.ri.x);
+	out.y = u01_closed_closed_32_24(res.ri.y);
+	return out;
 }
 
 // Marsaglia polar method:

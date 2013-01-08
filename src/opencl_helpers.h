@@ -17,6 +17,7 @@
 #include <initializer_list>
 #include <stdexcept>
 #include <boost/type_traits/is_same.hpp>
+#include <boost/format.hpp>
 #include <map>
 
 
@@ -258,27 +259,20 @@ private:
 	template<size_t i>
 	void argsN() {
 		if(i != argument_count)
-			throw std::invalid_argument("Expected more arguments");
+			throw std::invalid_argument(boost::str(boost::format("%s Expected more arguments") % name));
 	}
 
 	/** Recursion: deconstructs argument list */
 	template<size_t i, typename Head, typename... Tail>
-	void argsN(Head &head, Tail &... tail) {
-		arg(i, head);
+	void argsN(Head &&head, Tail &&... tail) {
+		arg(i, std::move(head));
 		argsN<i + 1>(tail...);
 	}
 
 public:
 	/** Set all arguments of the kernel to new values. */
 	template<typename... T>
-	kernel &operator()(T &... a) {
-		argsN<0u>(a...);
-		return *this;
-	}
-
-	/** Set all arguments of the kernel to new values. */
-	template<typename... T>
-	kernel &args(T &... a) {
+	kernel &operator()(T &&... a) {
 		argsN<0u>(a...);
 		return *this;
 	}
@@ -287,22 +281,17 @@ public:
 	 * Set one positional argument of the kernel to a new value immediately.
 	 */
 	template<typename T>
-	void arg(size_t i, const T &data) {
-		cl_uint status = clSetKernelArg(
-			native,
-			i,
-			sizeof(T),
-			&data
-		);
+	void arg(size_t i, const T &&data) {
+		cl_uint status = clSetKernelArg(native, i, sizeof(T), &data);
 		if(status != CL_SUCCESS)
-			throw error(status, "Couldn't set kernel argument to value");
+			throw error(status, boost::str(boost::format("Couldn't set kernel %s argument %d to value") % name % i));
 	}
 
 	/**
 	 * Set one positional argument of the kernel to a reference to the buffer.
 	 * (defers until actual execution since buffer size might be unknown yet)
 	 */
-	void arg(size_t i, buffer &buf) {
+	void arg(size_t i, buffer &&buf) {
 		buffer_arguments[i] = &buf;
 	}
 
