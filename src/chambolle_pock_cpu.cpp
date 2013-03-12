@@ -1,6 +1,9 @@
 #include "chambolle_pock.h"
 #include "multi_array_fft.h"
+
+#if HAVE_OPENMP
 #include <omp.h>
+#endif
 
 using namespace std;
 using namespace mimas;

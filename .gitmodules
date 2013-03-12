@@ -1,0 +1,3 @@
+[submodule "src/vexcl"]
+	path = src/vexcl
+	url = https://github.com/neapel/vexcl.git
