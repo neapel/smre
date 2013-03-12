@@ -1,20 +1,20 @@
 #include "chambolle_pock.h"
+#include "multi_array_fft.h"
 #if HAVE_OPENCL
 
 #include <vexcl/vexcl.hpp>
 #include <vexcl/fft.hpp>
 #include <vexcl/random.hpp>
 
-#define debug_(bufname, desc, type, fun) \
+#define debug_(bufname, desc, type, cltype, fun) \
 	if(debug) {\
-	}
-		//boost::multi_array<type, 2> __data(size); \
-		copy(bufname, __data.data()); \
+		boost::multi_array<type, 2> __data(size); \
+		copy(bufname, reinterpret_cast<cltype*>(__data.data())); \
 		debug_log.push_back(debug_state(fun, #bufname ": " desc)); \
 	}
 
-#define debug_r(bufname, desc) debug_(bufname, desc, float, __data)
-#define debug_c(bufname, desc) debug_(bufname, desc, cl_float2, mimas::real(__data))
+#define debug_r(bufname, desc) debug_(bufname, desc, float, cl_float, __data)
+#define debug_c(bufname, desc) debug_(bufname, desc, std::complex<float>, cl_float2, real(__data))
 
 
 boost::multi_array<float, 2> chambolle_pock::run_cl(const boost::multi_array<float, 2> &x_in) {
@@ -25,7 +25,6 @@ boost::multi_array<float, 2> chambolle_pock::run_cl(const boost::multi_array<flo
 	const auto size = extents_of(x_in);
 	const std::vector<size_t> size_2d{x_in.shape()[0], x_in.shape()[1]};
 	const size_t size_1d = size_2d[0] * size_2d[1];
-	const unsigned int width = size[1], height = size[0];
 
 	Context ctx(Filter::Env && Filter::Count(1));
 	std::cout << ctx << std::endl;
@@ -140,14 +139,11 @@ boost::multi_array<float, 2> chambolle_pock::run_cl(const boost::multi_array<flo
 			copy(data, data_h);
 			for(auto x : data_h) d2 << x << '\n';
 #endif
-			debug_c(data, "random data");
 			data_fft = fft(data);
-			debug_c(data, "forward fft'd");
 			std::vector<float> k_qs;
 			for(size_t j = 0 ; j < N ; j++) {
 				multiplied = complex_mul(data_fft, fft_k[j]);
 				convolved = ifft(multiplied);
-				debug_r(convolved, "convolved");
 				k_qs.push_back(max(fabs(convolved)));
 			}
 			float max_q = *max_element(k_qs.begin(), k_qs.end());
@@ -180,11 +176,11 @@ boost::multi_array<float, 2> chambolle_pock::run_cl(const boost::multi_array<flo
 			fft_conv = complex_mul(fft_k[i], fft_bar_x);
 			debug_c(fft_conv, "kernel * bar_x");
 			convolved = ifft(fft_conv);
-			debug_c(convolved, "backward fft");
+			debug_r(convolved, "backward fft");
 
 			// calculate new y_i
 			y[i] = soft_clamp(y[i] + convolved * float(sigma), float(q * sigma));
-			debug_c(y[i], "new y");
+			debug_r(y[i], "new y");
 
 			// convolve y_i with conjugate transpose of kernel
 			fft_conv = fft(y[i]);
@@ -192,7 +188,7 @@ boost::multi_array<float, 2> chambolle_pock::run_cl(const boost::multi_array<flo
 			fft_conv = complex_mul(fft_conv, fft_conj_k[i]);
 			debug_c(fft_conv, "kernel' * y[i]");
 			convolved = ifft(fft_conv);
-			debug_c(convolved, "backward fft");
+			debug_r(convolved, "backward fft");
 			
 			// accumulate
 			w += convolved;
@@ -211,7 +207,7 @@ boost::multi_array<float, 2> chambolle_pock::run_cl(const boost::multi_array<flo
 
 		// new bar_x
 		bar_x = new_x * (theta + 1) - x * theta;
-		debug_c(bar_x, "x - old_x");
+		debug_r(bar_x, "x - old_x");
 		x = new_x;
 	}
 

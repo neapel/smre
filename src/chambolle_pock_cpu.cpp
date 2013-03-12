@@ -17,12 +17,13 @@ inline float clamp(float x, float low, float high) {
 
 #define debug(...) \
 	if(debug) { \
-		_Pragma("omp critical") \
 		debug_log.push_back(debug_state(__VA_ARGS__)); \
 	}
 
 multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in) {
 	assert(sigma > 0);
+	const int original_threads = omp_get_num_threads();
+	if(debug) omp_set_num_threads(1);
 
 	auto x = x_in;
 
@@ -202,6 +203,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 	auto rec = Y - x;
 	debug(rec, "reconstruction");
 
+	if(debug) omp_set_num_threads(original_threads);
 	return rec;
 }
 
