@@ -1,199 +1,206 @@
 #include "chambolle_pock.h"
 #if HAVE_OPENCL
 
-#include "opencl_multi_array.h"
-
-using namespace std;
-using namespace boost;
-using namespace cl;
-
-typedef complex<float> float2;
-
+#include <vexcl/vexcl.hpp>
+#include <vexcl/fft.hpp>
+#include <vexcl/random.hpp>
 
 #define debug_(bufname, desc, type, fun) \
 	if(debug) {\
-		multi_array<type, 2> __data(size); \
-		ctx.wait(); cerr << "[DEBUG] "; ctx(bufname >> __data).then().resume(); \
+	}
+		//boost::multi_array<type, 2> __data(size); \
+		copy(bufname, __data.data()); \
 		debug_log.push_back(debug_state(fun, #bufname ": " desc)); \
 	}
 
 #define debug_r(bufname, desc) debug_(bufname, desc, float, __data)
-#define debug_c(bufname, desc) debug_(bufname, desc, float2, real(__data))
-
-#define kernel(name) \
-	auto name = prog[#name]
+#define debug_c(bufname, desc) debug_(bufname, desc, cl_float2, mimas::real(__data))
 
 
-using namespace boost;
-
-extern const char* chambolle_pock_kernels;
-
-
-multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) {
-	assert(sigma > 0);
+boost::multi_array<float, 2> chambolle_pock::run_cl(const boost::multi_array<float, 2> &x_in) {
+	using namespace vex;
 
 	const size_t N = constraints.size();
 
 	const auto size = extents_of(x_in);
-	const vector<size_t> size_2d{x_in.shape()[0], x_in.shape()[1]};
+	const std::vector<size_t> size_2d{x_in.shape()[0], x_in.shape()[1]};
 	const size_t size_1d = size_2d[0] * size_2d[1];
 	const unsigned int width = size[1], height = size[0];
 
-	// fft scale factor (AMDFFT scales automatically!)
-	// const float scale = 1;
+	Context ctx(Filter::Env && Filter::Count(1));
+	std::cout << ctx << std::endl;
 
-	context ctx;
-	auto prog = ctx.compile(chambolle_pock_kernels);
-	kernel(real2complex).size({size_1d});
-	kernel(pad);
-	kernel(conjugate_transpose_pad);
-	kernel(reduce_max_norm).size({size_1d});
-	kernel(complex_mul).size({size_1d});
-	kernel(add2v).size({size_1d});
-	kernel(mul_add3vs).size({size_1d});
-	kernel(mul_add2vs).size({size_1d});
-	kernel(mul_add_clamp).size({size_1d});
-	kernel(sub).size({size_1d});
-	kernel(random_fill).size({size_1d});
-	kernel(reduce_max_abs).size({1});
+	// Functions.
+	FFT<cl_float, cl_float2> fft(ctx.queue(), size_2d);
+	FFT<cl_float2, cl_float> ifft(ctx.queue(), size_2d, inverse);
+	Reductor<cl_float, MAX> max(ctx.queue());
 
-	cl::fft fft(size_2d);
+	VEX_FUNCTION(norm, cl_float(cl_float2),
+		"return dot(prm1, prm1);");
+	VEX_FUNCTION(complex_mul, cl_float2(cl_float2, cl_float2),
+		"return (float2)("
+		"prm1.x * prm2.x - prm1.y * prm2.y,"
+		"prm1.x * prm2.y + prm1.y * prm2.x);");
+	VEX_FUNCTION(soft_clamp, cl_float(cl_float, cl_float),
+		"if(prm1 < -prm2) return prm1 + prm2;"
+		"if(prm1 > prm2) return prm1 - prm2;"
+		"return 0;");
 
-	buffer
-		/*float2*/fft_k[N], // >->
-		/*float2*/fft_conj_k[N], // >->
-		/*float2*/y[N]; // >-
-	buffer
-		x(sizeof(float) * size_1d),
-		max_norm(sizeof(float) * size_1d),
-		new_x(sizeof(float) * size_1d),
-		bar_x(sizeof(float2) * size_1d), // >-
-		w(sizeof(float) * size_1d),
-		convolved(sizeof(float2) * size_1d), // ->
-		Y(sizeof(float) * size_1d),
-		fft_bar_x(sizeof(float2) * size_1d), // ->
-		fft_conv(sizeof(float2) * size_1d), // >-, ->
-		result(sizeof(float) * size_1d);
+	vector<cl_float> x(ctx.queue(), size_1d, x_in.data()),
+		max_norm(ctx.queue(), size_1d),
+		new_x(ctx.queue(), size_1d),
+		bar_x(ctx.queue(), size_1d),
+		w(ctx.queue(), size_1d),
+		Y(ctx.queue(), size_1d, x_in.data()),
+		result(ctx.queue(), size_1d),
+		convolved(ctx.queue(), size_1d);
+	vector<cl_float2>
+		fft_bar_x(ctx.queue(), size_1d),
+		fft_conv(ctx.queue(), size_1d);
+	std::vector<vector<cl_float>> y;
+	std::vector<vector<cl_float2>> fft_k, fft_conj_k;
 
-	// Upload input data.
-	auto seq = ctx( x << x_in );
+	// Upload input data (on creation)
 	debug_r(x, "initial");
-	seq = seq.then()( Y = x );
 	debug_r(Y, "keep");
-	seq = seq.then()( real2complex(x, bar_x) );
+
+	bar_x = x;
 
 	// Preprocess the kernels, i.e. pad and apply fourier transform.
-	float max_norm_v[N];
+	float total_norm = 0;
 	for(size_t i = 0 ; i < N ; i++) {
 		// init y.
-		seq = seq.then()( y[i].fill(float2(0), size_1d) );
+		y.emplace_back(ctx.queue(), size_1d);
+		y[i] = 0.0f;
 
 		// Get kernel
 		auto k = constraints[i].get_k(x_in);
-		const vector<size_t> k_size{k.shape()[0], k.shape()[1]};
+		const std::vector<size_t> k_size{k.shape()[0], k.shape()[1]};
 
 		// Pad and transform kernel
-		buffer k_real;
-		seq = seq.then()( k_real << k );
-		seq = seq.then()( fft_k[i].fill(float2(0), size_1d) );
-		seq = seq.then()( pad(k_real, fft_k[i], width).size(k_size) );
-		debug_c(fft_k[i], "kernel padded");
-		seq = seq.then()( fft.forward(fft_k[i]) );
-		debug_c(fft_k[i], "forward fft");
+		{
+			boost::multi_array<float, 2> padded_kernel(size_2d);
+			fill(padded_kernel, 0);
+			kernel_pad(k, padded_kernel);
+			vector<cl_float> k_real(ctx.queue(), size_1d, padded_kernel.data());
+			fft_k.emplace_back(ctx.queue(), size_1d);
+			debug_r(k_real, "kernel padded");
+			fft_k[i] = fft(k_real);
+			debug_c(fft_k[i], "forward fft");
+		}
 
 		// Calculate max norm of transformed kernel
-		seq = seq.then()( reduce_max_norm(fft_k[i], max_norm) );
-		seq = seq.then()( max_norm >> max_norm_v[i] );
+		total_norm += max(norm(fft_k[i]));
 
 		// Conjugate pad and transform kernel
-		seq = seq.then()( fft_conj_k[i].fill(float2(0), size_1d) );
-		seq = seq.then()( conjugate_transpose_pad(k_real, fft_conj_k[i], width, height).size(k_size) );
-		debug_c(fft_conj_k[i], "conjtransp padded");
-		seq = seq.then()( fft.forward(fft_conj_k[i]) );
-		debug_c(fft_conj_k[i], "forward fft");
+		{
+			boost::multi_array<float, 2> padded_kernel(size_2d);
+			auto t = conjugate_transpose(k);
+			fill(padded_kernel, 0);
+			kernel_pad(t, padded_kernel, true);
+			vector<cl_float> k_real(ctx.queue(), size_1d, padded_kernel.data());
+			debug_r(k_real, "conjtransp padded");
+			fft_conj_k.emplace_back(ctx.queue(), size_1d);
+			fft_conj_k[i] = fft(k_real);
+			debug_c(fft_conj_k[i], "forward fft");
+		}
 	}
 
-	seq.then().resume();
-	float total_norm = 0;
-	for(size_t i = 0 ; i < N ; i++)
-		total_norm += max_norm_v[i];
 	// Adjust sigma with norm.
 	sigma /= tau * total_norm;
-	cerr << "total norm = " << total_norm << endl;
+	std::cerr << "total norm = " << total_norm << std::endl;
 
-	// If needed, calculate `q` value.
-	const float q = cached_q(size, [&]{
-		cerr << "monte carlo sim, " << monte_carlo_steps << " steps" << endl;
-		vector<float> qs;
-		buffer
-			data(sizeof(float2) * size_1d),
-			convolved(sizeof(float2) * size_1d),
-			absmax(sizeof(float) * size_1d);
-		random_device dev;
-		mt19937 gen(dev());
+	// If needed, calculate `q/sigma` value.
+	float q = sigma * cached_q(size, [&]{
+		std::cerr << "monte carlo sim, " << monte_carlo_steps << " steps" << std::endl;
+#define DUMP_MC_DETAILS
+#ifdef DUMP_MC_DETAILS
+		std::ofstream d("monte-carlo-debug.dat");
+		for(auto c : constraints) d << c.expr << '\t';
+		d << "max\n";
+		d << std::setprecision(12) << std::scientific;
+#endif
+#ifdef DUMP_RANDOM_NUMBERS
+		std::ofstream d2("monte-carlo-randoms.dat");
+		d2 << std::setprecision(12) << std::scientific;
+#endif
+		std::vector<float> qs;
+		vector<cl_float> data(ctx.queue(), size_1d);
+		vector<cl_float> convolved(ctx.queue(), size_1d);
+		vector<cl_float2> data_fft(ctx.queue(), size_1d);
+		vector<cl_float2> multiplied(ctx.queue(), size_1d);
+		vector<cl_float> absmax(ctx.queue(), size_1d);
+		RandomNormal<cl_float> random;
+		std::random_device dev;
+		std::mt19937 gen(dev());
 		for(int i = 0 ; i < monte_carlo_steps ; i++) {
-			seq = seq.then()( random_fill(data, cl_uint(size_1d), cl_uint(gen()), float(sigma)) );
+			data = random(element_index(), gen());
+#ifdef DUMP_RANDOM_NUMBERS
+			std::vector<float> data_h(size_1d);
+			copy(data, data_h);
+			for(auto x : data_h) d2 << x << '\n';
+#endif
 			debug_c(data, "random data");
-			seq = seq.then()( fft.forward(data) );
+			data_fft = fft(data);
 			debug_c(data, "forward fft'd");
-			float that_q = 0;
+			std::vector<float> k_qs;
 			for(size_t j = 0 ; j < N ; j++) {
-				seq = seq.then()( complex_mul(convolved, data, fft_k[j]) );
-				seq = seq.then()( fft.backward(convolved) );
-				debug_c(convolved, "convolved");
-				seq = seq.then()( reduce_max_abs(convolved, cl_uint(size_1d), absmax) );
-				float kernel_q = -1;
-				seq = seq.then()( absmax >> kernel_q );
-				seq.then().resume();
-				that_q = max(that_q, kernel_q);
-				cerr << "step " << i << '/' << monte_carlo_steps << " kernel" << j << " kernel_q=" << kernel_q << endl;;
+				multiplied = complex_mul(data_fft, fft_k[j]);
+				convolved = ifft(multiplied);
+				debug_r(convolved, "convolved");
+				k_qs.push_back(max(fabs(convolved)));
 			}
-			cerr << "step " << i << " q=" << that_q << endl;
-			qs.push_back(that_q);
+			float max_q = *max_element(k_qs.begin(), k_qs.end());
+
+#ifdef DUMP_MC_DETAILS
+			for(auto q : k_qs) d << q << '\t';
+			d << max_q << std::endl;
+#endif
+			if(i % 100 == 0)
+				std::cerr << "step " << i << " q=" << max_q << std::endl;
+			qs.push_back(max_q);
 		}
-		seq.then().resume();
 		return qs;
 	});
-	cerr << "q = " << q << "   " << endl;
+	std::cerr << "q = " << q << "   " << std::endl;
 
 
 	// Repeat until good enough.
 	for(int n = 0 ; n < max_steps ; n++) {
 		// reset accumulator
-		seq = seq.then()( w = 0.0f );
+		w = 0.0f;
 
 		// transform bar_x for convolutions
-		seq = seq.then()( fft.forward(bar_x, fft_bar_x) );
+		fft_bar_x = fft(bar_x);
 		debug_c(fft_bar_x, "forward fft bar_x");
 
 		// for each constraint
 		for(size_t i = 0 ; i < N ; i++) {
 			// convolve bar_x with kernel
-			seq = seq.then()( complex_mul(fft_conv, fft_k[i], fft_bar_x) );
+			fft_conv = complex_mul(fft_k[i], fft_bar_x);
 			debug_c(fft_conv, "kernel * bar_x");
-			seq = seq.then()( fft.backward(fft_conv, convolved) );
+			convolved = ifft(fft_conv);
 			debug_c(convolved, "backward fft");
 
 			// calculate new y_i
-			seq = seq.then()( mul_add_clamp(y[i], y[i], convolved,
-				float(sigma), float(-q * sigma), float(q * sigma)) );
+			y[i] = soft_clamp(y[i] + convolved * float(sigma), float(q * sigma));
 			debug_c(y[i], "new y");
 
 			// convolve y_i with conjugate transpose of kernel
-			seq = seq.then()( fft.forward(y[i], fft_conv) );
+			fft_conv = fft(y[i]);
 			debug_c(fft_conv, "y[i] forward fft");
-			seq = seq.then()( complex_mul(fft_conv, fft_conv, fft_conj_k[i]) );
+			fft_conv = complex_mul(fft_conv, fft_conj_k[i]);
 			debug_c(fft_conv, "kernel' * y[i]");
-			seq = seq.then()( fft.backward(fft_conv, convolved) );
+			convolved = ifft(fft_conv);
 			debug_c(convolved, "backward fft");
 			
 			// accumulate
-			seq = seq.then()( add2v(w, w, convolved) );
+			w += convolved;
 		}
 
 		// new x
 		const float tau_tau = tau / (1 + tau);
-		seq = seq.then()( mul_add3vs(new_x, x, float(1 / (1 + tau)), w, -tau_tau, Y, tau_tau) );
+		new_x = x * float(1 / (1 + tau)) - w * tau_tau + Y * tau_tau;
 		debug_r(new_x, "x - w + Y");
 
 		// theta
@@ -203,18 +210,17 @@ multi_array<float, 2> chambolle_pock::run_cl(const multi_array<float, 2> &x_in) 
 		sigma /= theta;
 
 		// new bar_x
-		seq = seq.then()( mul_add2vs(bar_x, new_x, theta + 1, x, -theta) );
+		bar_x = new_x * (theta + 1) - x * theta;
 		debug_c(bar_x, "x - old_x");
-		seq = seq.then()( x = new_x );
+		x = new_x;
 	}
 
 	debug_r(Y, "original");
 	debug_r(x, "result");
-	multi_array<float, 2> result_a(size);
-	seq = seq.then()( sub(result, Y, x) );
+	result = Y - x;
+	boost::multi_array<float, 2> result_a(size);
+	copy(result, result_a.data());
 	debug_r(result, "reconstruction");
-	seq = seq.then()( result >> result_a );
-	seq.then().resume();
 
 	return result_a;
 }
