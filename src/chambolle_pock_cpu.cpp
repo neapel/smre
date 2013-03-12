@@ -37,18 +37,21 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 	const float scale = 1.0f / (width*height);
 
 	// arrays
-	multi_array<float, 2> bar_x = x, w(size), convolved(size), dx(size), Y = x, padded_kernel(size);
-	multi_array<complex<float>, 2> fft_bar_x(c_size), fft_conv(c_size);
+	const multi_array<float, 2> Y = x;
+	multi_array<float, 2> bar_x = x;
 	vector<multi_array<float, 2>> y;
 	vector<multi_array<complex<float>, 2>> fft_k, fft_conj_k;
 	for(size_t i = 0 ; i < N ; i++) {
 		y.push_back(multi_array<float, 2>(size));
-		fft_k.push_back(multi_array<complex<float>, 2>(size));
-		fft_conj_k.push_back(multi_array<complex<float>, 2>(size));
+		fill(y[i], 0);
+		fft_k.push_back(multi_array<complex<float>, 2>(c_size));
+		fft_conj_k.push_back(multi_array<complex<float>, 2>(c_size));
 	}
 
-	auto forward = fftw::forward(bar_x, fft_bar_x); // size -> c_size
-	auto backward = fftw::backward(fft_bar_x, bar_x); // c_size -> size
+	multi_array<float, 2> _real(size);
+	multi_array<complex<float>, 2> _comp(c_size);
+	auto forward = fftw::forward(_real, _comp); // size -> c_size
+	auto backward = fftw::backward(_comp, _real); // c_size -> size
 
 	debug(x, "x: initial");
 	debug(Y, "Y: keep");
@@ -61,7 +64,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		auto k = constraints[i].get_k(x_in);
 
 		// Pad and transform kernel
-		fft_k[i].resize(c_size);
+		multi_array<float, 2> padded_kernel(size);
 		fill(padded_kernel, 0);
 		kernel_pad(k, padded_kernel);
 		debug(padded_kernel, "kernel padded");
@@ -73,7 +76,6 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		total_norm += max(normed);
 
 		// Conjugate pad and transform kernel
-		fft_conj_k[i].resize(c_size);
 		auto t = conjugate_transpose(k);
 		fill(padded_kernel, 0);
 		kernel_pad(t, padded_kernel, true);
@@ -87,7 +89,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 	cerr << "sigma = " << sigma << endl;
 
 	// If needed, calculate `q` value.
-	const float q = cached_q(size, [&]{
+	const float q = sigma * cached_q(size, [&]{
 		cerr << "monte carlo sim, " << monte_carlo_steps << " steps" << endl;
 		vector<float> qs;
 		#pragma omp parallel
@@ -128,27 +130,31 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 	// Repeat until good enough.
 	for(int n = 0 ; n < max_steps ; n++) {
 		// reset accumulator
+		multi_array<float, 2> w(size);
 		fill(w, 0);
 
 		// transform bar_x for convolutions
+		multi_array<complex<float>, 2> fft_bar_x(c_size);
 		forward(bar_x, fft_bar_x);
 		debug(real(fft_bar_x), "forward fft bar_x");
 
 		// for each constraint
-		#pragma omp parallel for firstprivate(fft_conv, convolved)
+		#pragma omp parallel for
 		for(size_t i = 0 ; i < N ; i++) {
 			// convolve bar_x with kernel
+			multi_array<complex<float>, 2> fft_conv(c_size);
 			for(size_t ix = 0 ; ix < c_width ; ix++)
 				for(size_t iy = 0 ; iy < c_height ; iy++)
 					fft_conv[ix][iy] = fft_k[i][ix][iy] * fft_bar_x[ix][iy] * scale;
 			debug(real(fft_conv), "kernel * bar_x");
-			backward(fft_conv, convolved);
-			debug(convolved, "backward fft");
+			multi_array<float, 2> convolved1(size);
+			backward(fft_conv, convolved1);
+			debug(convolved1, "backward fft");
 
 			// calculate new y_i
 			for(size_t ix = 0 ; ix < width ; ix++)
 				for(size_t iy = 0 ; iy < height ; iy++)
-					y[i][ix][iy] = clamp(y[i][ix][iy] + sigma * convolved[ix][iy], -q * sigma, q * sigma);
+					y[i][ix][iy] = clamp(y[i][ix][iy] + sigma * convolved1[ix][iy], -q * sigma, q * sigma);
 			debug(y[i], "new y");
 
 			// convolve y_i with conjugate transpose of kernel
@@ -158,12 +164,13 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 				for(size_t iy = 0 ; iy < c_height ; iy++)
 					fft_conv[ix][iy] *= fft_conj_k[i][ix][iy] * scale;
 			debug(real(fft_conv), "kernel' * y[i]");
-			backward(fft_conv, convolved);
-			debug(convolved, "backward fft");
+			multi_array<float, 2> convolved2(size);
+			backward(fft_conv, convolved2);
+			debug(convolved2, "backward fft");
 
 			// accumulate
 			#pragma omp critical
-			w += convolved;
+			w += convolved2;
 		}
 
 		auto old_x = x;

@@ -28,7 +28,11 @@ kernel_generator box_kernel(size_t size) {
 	using namespace boost;
 	return [=](size_t, size_t) {
 		multi_array<float, 2> k(extents[size][size]);
-		fill(k, 1.0f/size);
+		// 1/sqrt(2 * #S) = 1/sqrt(2 * size*size) = 1/(sqrt(2) * s)
+		// TODO: mit 1/(M_SQRT2 * size) wiegen grosse Kernel mehr, Monte-Carlo-Sim kleinerer sinnlos.
+		// mit 1.0/(size*size) -- immer noch zu viel?
+		fill(k, 1/(M_SQRT2 * size));
+		//fill(k, pow(size, -1));
 		return k;
 	};
 }

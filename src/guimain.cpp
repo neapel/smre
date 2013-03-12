@@ -4,10 +4,12 @@
 #include <boost/regex.hpp>
 #include <stdexcept>
 #include <boost/format.hpp>
+#include <boost/lexical_cast.hpp>
 #include <cmath>
 #include "config.h"
 
 #include "chambolle_pock.h"
+#include "constraint_parser.h"
 
 using namespace std;
 using namespace Gtk;
@@ -200,7 +202,9 @@ struct main_window : Gtk::ApplicationWindow {
 				constraints_menu.popup(evt->button, evt->time);
 		});
 
-		left_pane->pack_start(constraints_view);
+		auto constraints_scroll = manage(new ScrolledWindow());
+		constraints_scroll->add(constraints_view);
+		left_pane->pack_start(*constraints_scroll);
 		constraints_view.append_column_editable("Kernel", constraints_columns.kernel);
 
 		// Output
@@ -328,7 +332,8 @@ struct app_t : Gtk::Application {
 
 	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
 		if(!has_value) return false;
-		p->constraints.push_back(constraint{value});
+		for(auto k : constraints_from_string(value))
+			p->constraints.push_back(k);
 		return true;
 	}
 
@@ -343,6 +348,7 @@ struct app_t : Gtk::Application {
 		group.add_entry(entry("gamma", "initial value for gamma"), p->gamma);
 		group.add_entry(entry("steps", "number of iteration steps"), p->max_steps);
 		group.add_entry(entry("opencl", "use opencl implementation"), p->opencl);
+		group.add_entry(entry("mc-steps", "number of Monte Carlo steps"), p->monte_carlo_steps);
 		group.add_entry(entry("no-cache", "don't use the monte carlo cache"), p->no_cache);
 		group.add_entry(entry("debug", "enable debug output"), p->debug);
 
