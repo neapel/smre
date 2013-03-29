@@ -1,6 +1,6 @@
 
 # Test harness
-set(CMAKE_REQUIRED_LIBRARIES smre ${CMAKE_REQUIRED_LIBRARIES})
+#set(CMAKE_REQUIRED_LIBRARIES smre ${CMAKE_REQUIRED_LIBRARIES})
 
 macro(tiny_test NAME)
 	add_executable(${NAME} "${NAME}.cpp")
@@ -30,24 +30,25 @@ tiny_test(test_multi_array_print)
 tiny_test(test_multi_array_fft)
 
 # operator split
-tiny_test(test_tuple_cut)
-tiny_test(test_operator_split)
+#tiny_test(test_tuple_cut)
+#tiny_test(test_operator_split)
 
 # io
-if(HAVE_MATIO)
-	tiny_test(test_matlab_io "${MAT_DIR}/test.mat")
-endif()
-tiny_test(test_plain_io)
+#if(HAVE_MATIO)
+#	tiny_test(test_matlab_io "${MAT_DIR}/test.mat")
+#endif()
+#tiny_test(test_plain_io)
 
 if(HAVE_GIL)
 	tiny_test(test_gil_io "${MAT_DIR}/rgb8.jpg")
 endif()
 
 # opencl
-if(HAVE_OPENCL)
-	tiny_test(test_opencl)
-	tiny_test(test_opencl_multi_array)
-	tiny_test(test_opencl_fft)
-endif()
+#if(HAVE_OPENCL)
+#	tiny_test(test_opencl)
+#	tiny_test(test_opencl_multi_array)
+#	tiny_test(test_opencl_fft)
+#endif()
 
 tiny_test(test_kernel_generator)
+tiny_test(test_resolvent)

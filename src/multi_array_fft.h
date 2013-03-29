@@ -2,7 +2,7 @@
 #define __MULTI_ARRAY_FFT_H__
 
 extern "C" {
-	#include <fftw3.h>
+#include <fftw3.h>
 }
 #include <boost/multi_array.hpp>
 #include <array>
@@ -41,19 +41,19 @@ struct plan {
 	template<size_t dims>
 	plan(const boost::multi_array<std::complex<float>, dims> &in, boost::multi_array<std::complex<float>, dims> &out, int dir, unsigned int flags) {
 		switch(dir) {
-			case FFTW_FORWARD: break;
-			case FFTW_BACKWARD: break;
-			default: throw std::invalid_argument("Only C2C Fourier transform.");
+		case FFTW_FORWARD: break;
+		case FFTW_BACKWARD: break;
+		default: throw std::invalid_argument("Only C2C Fourier transform.");
 		}
 		auto shape = get_shape(in, out);
 		for(size_t i = 0 ; i < dims ; i++)
 			if(in.shape()[i] != out.shape()[i])
 				throw std::invalid_argument("Input and output arrays must be of same size.");
 
-		#pragma omp critical
+#pragma omp critical
 		p = fftwf_plan_dft(dims, shape.data(),
-			const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
-			reinterpret_cast<fftwf_complex *>(out.origin()), dir, flags);
+				const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
+				reinterpret_cast<fftwf_complex *>(out.origin()), dir, flags);
 	}
 
 	/** Real to Complex FFT. */
@@ -68,7 +68,7 @@ struct plan {
 			if(in.shape()[i] != out.shape()[i])
 				throw std::invalid_argument("Other dimensions must be same size.");
 
-		#pragma omp critical
+#pragma omp critical
 		p = fftwf_plan_dft_r2c(dims, shape.data(), const_cast<float *>(in.origin()),
 				reinterpret_cast<fftwf_complex *>(out.origin()), flags);
 	}
@@ -85,10 +85,34 @@ struct plan {
 			if(in.shape()[i] != out.shape()[i])
 				throw std::invalid_argument("Other dimensions must be same size.");
 
-		#pragma omp critical
+#pragma omp critical
 		p = fftwf_plan_dft_c2r(dims, shape.data(),
 				const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
 				out.origin(), flags);
+	}
+
+	/** Real to Real FFT. */
+	template<size_t dims>
+	plan(const boost::multi_array<float, dims> &in, boost::multi_array<float, dims> &out, int dir, unsigned int flags) {
+		fftw_r2r_kind kind[dims];
+		switch(dir) {
+		case FFTW_FORWARD:
+			for(size_t k = 0; k < dims; k++)
+				kind[k] = FFTW_REDFT10;
+			break;
+		case FFTW_BACKWARD:
+			for(size_t k = 0; k < dims; k++)
+				kind[k] = FFTW_REDFT01;
+			break;
+		default: throw std::invalid_argument("Only R2R Fourier transform.");
+		}
+		auto shape = get_shape(in, out);
+		for(size_t i = 0 ; i < dims ; i++)
+			if(in.shape()[i] != out.shape()[i])
+				throw std::invalid_argument("Input and output arrays must be of same size.");
+
+		p = fftwf_plan_r2r(dims, shape.data(),
+				const_cast<float *>(in.origin()), out.origin(), kind, flags);
 	}
 
 	/** Execute the plan with the original arrays */
@@ -112,18 +136,18 @@ struct plan {
 		fftwf_execute_dft_c2r(p, const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())), out.origin());
 	}
 
+	template<size_t dims>
+	void operator()(const boost::multi_array<float, dims> &in, boost::multi_array<float, dims> &out) {
+		fftwf_execute_r2r(p, const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())), out.origin());
+	}
+
 	/** Destroy the plan. */
 	~plan() {
 		if(p != NULL)
-			#pragma omp critical
+#pragma omp critical
 			fftwf_destroy_plan(p);
 	}
 };
-
-
-
-
-
 
 template<class In, class Out>
 plan forward(const In &in, Out &out, unsigned int flags = FFTW_ESTIMATE) {
@@ -135,7 +159,5 @@ plan backward(const In &in, Out &out, unsigned int flags = FFTW_ESTIMATE) {
 	return {in, out, FFTW_BACKWARD, flags};
 }
 
-};
-
-
+}
 #endif

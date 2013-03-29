@@ -2,7 +2,7 @@
 #include "kernel_generator.h"
 #include <fstream>
 
-#define BOOST_FILESYSTEM_NO_DEPRECATED 1
+//#define BOOST_FILESYSTEM_NO_DEPRECATED 1
 #include <boost/filesystem.hpp>
 
 using namespace boost;

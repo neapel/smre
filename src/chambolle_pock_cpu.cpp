@@ -1,5 +1,6 @@
 #include "chambolle_pock.h"
 #include "multi_array_fft.h"
+#include "resolvent.h"
 
 #if HAVE_OPENMP
 #include <omp.h>
@@ -16,9 +17,9 @@ inline float clamp(float x, float low, float high) {
 }
 
 #define debug(...) \
-	if(debug) { \
-		debug_log.push_back(debug_state(__VA_ARGS__)); \
-	}
+		if(debug) { \
+			debug_log.push_back(debug_state(__VA_ARGS__)); \
+		}
 
 multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in) {
 	assert(sigma > 0);
@@ -57,9 +58,18 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 	debug(x, "x: initial");
 	debug(Y, "Y: keep");
 
+//	// init the resolvent (h1)
+//	float delta = 0.5;
+//	h1resolvent resolv(width, height, 0.5, tau);
+//	gamma = 1- delta;
+
+	// init the resolvent (l2)
+	resolvent resolv(tau);
+	gamma = 1;
+
 	// Preprocess the kernels, i.e. pad and apply fourier transform.
 	float total_norm = 0;
-	#pragma omp parallel for reduction(+:total_norm)
+#pragma omp parallel for reduction(+:total_norm)
 	for(size_t i = 0 ; i < N ; i++) {
 		// Get kernel
 		auto k = constraints[i].get_k(x_in);
@@ -93,7 +103,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 	const float q = sigma * cached_q(size, [&]{
 		cerr << "monte carlo sim, " << monte_carlo_steps << " steps" << endl;
 		vector<float> qs;
-		#pragma omp parallel
+#pragma omp parallel
 		{
 			multi_array<float, 2> data(size), convolved(size);
 			multi_array<complex<float>, 2> fft_data(c_size), fft_conv(c_size);
@@ -101,7 +111,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 			random_device dev;
 			mt19937 gen(dev());
 			normal_distribution<float> dist(/*mean*/0, /*stddev*/sigma);
-			#pragma omp for
+#pragma omp for
 			for(int i = 0 ; i < monte_carlo_steps ; i++) {
 				// random image
 				for(size_t ix = 0 ; ix < width ; ix++)
@@ -120,7 +130,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 							that_q = max(that_q, abs(convolved[ix][iy]));
 				}
 				// save to main thread
-				#pragma omp critical
+#pragma omp critical
 				qs.push_back(that_q);
 			}
 		}
@@ -140,7 +150,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		debug(real(fft_bar_x), "forward fft bar_x");
 
 		// for each constraint
-		#pragma omp parallel for
+#pragma omp parallel for
 		for(size_t i = 0 ; i < N ; i++) {
 			// convolve bar_x with kernel
 			multi_array<complex<float>, 2> fft_conv(c_size);
@@ -170,17 +180,20 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 			debug(convolved2, "backward fft");
 
 			// accumulate
-			#pragma omp critical
+#pragma omp critical
 			w += convolved2;
 		}
 
 		auto old_x = x;
 
 		// new x
-		#pragma omp parallel for
+		resolv.update_param(tau);
+
 		for(size_t ix = 0 ; ix < width ; ix++)
 			for(size_t iy = 0 ; iy < height ; iy++)
-				x[ix][iy] = (x[ix][iy] - tau * w[ix][iy] + tau * Y[ix][iy]) / (1 + tau);
+				bar_x[ix][iy] = x[ix][iy] - tau * w[ix][iy] - Y[ix][iy];
+
+		x = resolv.evaluate(bar_x)+Y;
 		debug(x, "new_x: x - w + Y");
 
 		// theta
@@ -190,7 +203,7 @@ multi_array<float, 2> chambolle_pock::run_cpu(const multi_array<float, 2> &x_in)
 		sigma /= theta;
 
 		// new bar_x
-		#pragma omp parallel for
+#pragma omp parallel for
 		for(size_t ix = 0 ; ix < width ; ix++)
 			for(size_t iy = 0 ; iy < height ; iy++)
 				bar_x[ix][iy] = x[ix][iy] + theta * (x[ix][iy] - old_x[ix][iy]);
