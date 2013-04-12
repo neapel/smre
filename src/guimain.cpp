@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <boost/format.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/algorithm/string.hpp>
 #include <cmath>
 #include "config.h"
 #include "multi_array_io.h"
@@ -26,6 +27,7 @@ struct main_window : Gtk::ApplicationWindow {
 	RefPtr<Pixbuf> input_image;
 
 	SpinButton alpha_value, tau_value, sigma_value, max_steps_value;
+	CheckButton impl_value, resolv_value, penalized_scan_value, debug_value;
 	Statusbar statusbar;
 	Spinner progress;
 	Notebook notebook;
@@ -48,7 +50,6 @@ struct main_window : Gtk::ApplicationWindow {
 
 	Menu constraints_menu;
 	RefPtr<Action> add_constraint, remove_constraint, load_image, run;
-	RefPtr<ToggleAction> use_cl, use_debug;
 
 	vector<debug_state<T>> current_log, previous_log;
 	Dispatcher algorithm_done;
@@ -59,6 +60,10 @@ struct main_window : Gtk::ApplicationWindow {
 	  tau_value{Adjustment::create(p->tau, 0, 1000), 0, 2},
 	  sigma_value{Adjustment::create(p->sigma, 0, 5), 0, 2},
 	  max_steps_value{Adjustment::create(p->max_steps, 1, 100)},
+	  impl_value{"Use OpenCL"},
+	  resolv_value{"Use H1 resolvent"},
+	  penalized_scan_value{"Use penalized scan"},
+	  debug_value{"Debug log"},
 	  constraints_model{ListStore::create(constraints_columns)},
 	  constraints_view{constraints_model},
 	  steps_model{ListStore::create(steps_columns)},
@@ -66,9 +71,7 @@ struct main_window : Gtk::ApplicationWindow {
 	  add_constraint{Action::create("add_constraint", Stock::ADD, "_Add Constraint")},
 	  remove_constraint{Action::create("remove_constraint", Stock::REMOVE, "Remo_ve Constraint")},
 	  load_image{Action::create("load_image", Stock::OPEN, "_Load Image")},
-	  run{Action::create("run", Stock::EXECUTE, "_Run Chambolle-Pock")},
-	  use_cl{ToggleAction::create("use_cl", Stock::CONNECT, "Use OpenCL")},
-	  use_debug{ToggleAction::create("use_cl", Stock::PROPERTIES, "Debug")}
+	  run{Action::create("run", Stock::EXECUTE, "_Run Chambolle-Pock")}
 	{
 		// Main layout
 		auto vbox = manage(new VBox());
@@ -85,12 +88,6 @@ struct main_window : Gtk::ApplicationWindow {
 		run->set_sensitive(false);
 		run->signal_activate().connect([&]{do_run();});
 		toolbar->append(*run->create_tool_item());
-
-		use_cl->set_is_important(true);
-		toolbar->append(*use_cl->create_tool_item());
-
-		use_debug->set_is_important(true);
-		toolbar->append(*use_debug->create_tool_item());
 
 		// Main area
 		auto paned = manage(new HBox());
@@ -112,6 +109,10 @@ struct main_window : Gtk::ApplicationWindow {
 		auto max_steps_label = manage(new Label("Steps", ALIGN_START));
 		options->attach_next_to(*max_steps_label, *sigma_label, POS_BOTTOM, 1, 1);
 		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
+		options->attach_next_to(impl_value, *max_steps_label, POS_BOTTOM, 2, 1);
+		options->attach_next_to(resolv_value, impl_value, POS_BOTTOM, 2, 1);
+		options->attach_next_to(penalized_scan_value, resolv_value, POS_BOTTOM, 2, 1);
+		options->attach_next_to(debug_value, penalized_scan_value, POS_BOTTOM, 2, 1);
 
 		// Connect to model
 		alpha_value.signal_value_changed().connect([=]{ p->alpha = alpha_value.get_value(); });
@@ -119,10 +120,21 @@ struct main_window : Gtk::ApplicationWindow {
 		sigma_value.signal_value_changed().connect([=]{ p->sigma = sigma_value.get_value(); });
 		max_steps_value.signal_value_changed().connect([=]{ p->max_steps = max_steps_value.get_value(); });
 
-		use_cl->set_active(p->implementation == GPU_IMPL);
-		use_cl->signal_toggled().connect([=]{ p->implementation = use_cl->get_active() ? GPU_IMPL : CPU_IMPL; });
-		use_debug->set_active(p->debug);
-		use_debug->signal_toggled().connect([=]{ p->debug = use_debug->get_active(); });
+		impl_value.set_active(p->implementation == GPU_IMPL);
+		impl_value.signal_toggled().connect([=]{ p->implementation = impl_value.get_active() ? GPU_IMPL : CPU_IMPL; });
+
+		resolv_value.signal_toggled().connect([=]{
+			if(resolv_value.get_active()) p->resolvent = new resolvent_h1_params<T>();
+			else p->resolvent = new resolvent_l2_params<T>();
+		});
+
+		penalized_scan_value.set_active(p->penalized_scan);
+		penalized_scan_value.signal_toggled().connect([=]{ p->penalized_scan = penalized_scan_value.get_active(); });
+
+		debug_value.set_active(p->debug);
+		debug_value.signal_toggled().connect([=]{ p->debug = debug_value.get_active(); });
+
+
 
 		// Constraints Table
 		for(auto cons : p->kernel_sizes) {
