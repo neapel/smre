@@ -19,13 +19,12 @@ namespace std {
 
 
 // parse a kernel list expression: "<kind>:<size0>[,<size1>,...,<sizeN>]"
-std::vector<constraint> constraints_from_string(std::string expr) {
+std::vector<size_t> constraints_from_string(std::string expr) {
 	using namespace boost;
-	std::vector<constraint> kernels;
-	regex r("(?<kind>\\w+):(?<start>\\d+)((?<list>(,(\\d+))+)|((,(?<next>\\d+))?,\\.{2,},(?<end>\\d+)))?");
+	std::vector<size_t> sizes;
+	regex r("(?<start>\\d+)((?<list>(,(\\d+))+)|((,(?<next>\\d+))?,\\.{2,},(?<end>\\d+)))?");
 	smatch m;
 	if(regex_match(expr, m, r)) {
-		std::vector<size_t> sizes;
 		auto start = lexical_cast<size_t>(m["start"]);
 		sizes.push_back(start);
 		auto list_m = m["list"], next_m = m["next"], end_m = m["end"];
@@ -42,12 +41,7 @@ std::vector<constraint> constraints_from_string(std::string expr) {
 			for(size_t i = next ; i <= end ; i += delta)
 				sizes.push_back(i);
 		}
-
-		auto ks = format("%s:%d");
-		auto kind = m["kind"].str();
-		for(size_t s : sizes)
-			kernels.push_back(constraint{str(ks % kind % s)});
-		return kernels;
+		return sizes;
 	}
 	throw std::invalid_argument("invalid kernels expression.");
 }

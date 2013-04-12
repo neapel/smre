@@ -9,22 +9,26 @@
 #include <memory>
 #include <iostream>
 
-/**
- * One constraint: \f$ -q \le (k * x)_w \le q \quad\forall w \in I \f$
- */
-struct constraint {
-	std::string expr;
-	constraint(std::string expr = "") : expr(expr) {}
-	constraint(const constraint &other) : expr(other.expr) {}
+#include <fstream>
 
-	// lazy generator
-	boost::multi_array<float, 2> get_k(const boost::multi_array<float, 2> &);
+#include <boost/filesystem.hpp>
+
+
+
+
+
+
+// Implementation type.
+enum impl_t {
+	CPU_IMPL, GPU_IMPL
 };
 
+
+template<class T>
 struct debug_state {
-	boost::multi_array<float, 2> img;
+	boost::multi_array<T, 2> img;
 	std::string name;
-	debug_state(boost::multi_array<float, 2> img, std::string name = "") : img(img), name(name) {}
+	debug_state(boost::multi_array<T, 2> img, std::string name = "") : img(img), name(name) {}
 };
 
 
@@ -48,37 +52,90 @@ struct debug_state {
  * 		\bar x^{n + 1} &= x^{n + 1} + \theta_n (x^{n + 1} - x^n)
  * 	\f}
  */
-struct chambolle_pock {
-	int max_steps, monte_carlo_steps;
-	double alpha, tau, sigma, gamma;
-	std::vector<constraint> constraints;
-	std::vector<debug_state> debug_log;
-	bool debug, opencl, no_cache;
 
-	chambolle_pock()
-	: max_steps(10), monte_carlo_steps(1000), alpha(0.5), tau(50), sigma(1), gamma(1), constraints(), debug_log(), debug(false), opencl(false), no_cache(false) {}
+typedef std::array<size_t, 2> size2_t;
 
-	boost::multi_array<float, 2> run(const boost::multi_array<float, 2> &input) {
-#if HAVE_OPENCL
-		return opencl ? run_cl(input) : run_cpu(input);
-#else
-		return run_cpu(input);
-#endif
+template<class T>
+struct impl;
+
+template<class T>
+struct params {
+	size_t max_steps = 10, monte_carlo_steps = 1000;
+	T alpha, tau, sigma, input_variance = 1;
+	bool debug = false, no_cache = false, penalized_scan = false;
+	impl_t implementation;
+	std::vector<size_t> kernel_sizes;
+	size2_t size;
+
+	params(size2_t size = {{0,0}}, std::vector<size_t> kernel_sizes = std::vector<size_t>(), T alpha = 0.5, T tau = 50, T sigma = 1)
+	: alpha(alpha), tau(tau), sigma(sigma), implementation(CPU_IMPL), kernel_sizes(kernel_sizes), size(size) {}
+
+	impl<T> *runner() const;
+
+	template<class A>
+	void set_size(A a) {
+		size[0] = *a++;
+		size[1] = *a++;
 	}
-
-	boost::multi_array<float, 2> run_cpu(const boost::multi_array<float, 2> &);
-
-#if HAVE_OPENCL
-	boost::multi_array<float, 2> run_cl(const boost::multi_array<float, 2> &);
-#endif
-
-	// tries to load the cached value for `q`
-	// if not found, calculates it and saves the result.
-	float cached_q(std::array<size_t, 2>, std::function<std::vector<float>()>);
 };
 
 
+template<class T>
+struct impl {
+	params<T> p;
+	std::vector<debug_state<T>> debug_log;
+
+	impl(const params<T> &p) : p(p), debug_log() {}
+
+	virtual boost::multi_array<T, 2> run(const boost::multi_array<T,2> &) = 0;
+
+protected:
+	T cached_q(std::function<std::vector<T>()> calc) {
+		static const auto cache_dir = "cache/";
+		using namespace std;
+		using namespace boost::filesystem;
+		// filename from kernel stack
+		ostringstream ss; ss << cache_dir << p.size[0] << 'x' << p.size[1];
+		for(auto s : p.kernel_sizes)
+			ss << '+' << s;
+		auto target = ss.str();
+		create_directories(cache_dir);
+		vector<T> qs;
+		if(p.no_cache || !exists(target)) {
+			// simulate
+			qs = calc();
+			if(qs.size() == 0) return 4;
+			sort(qs.begin(), qs.end());
+			// write raw output.
+			ofstream f(target);
+			for(auto x : qs) f << x << '\n';
+		} else {
+			// read
+			ifstream f(target);
+			for(T value ; f >> value ; qs.push_back(value));
+			sort(qs.begin(), qs.end());
+		}
+		// return (1 - alpha) quantile:
+		return qs[size_t((qs.size() - 1) * (1 - p.alpha))];
+	}
+
+};
+
+template<impl_t, class T>
+struct chambolle_pock : impl<T> {};
 
 
+
+#include "chambolle_pock_cpu.h"
+#include "chambolle_pock_cl.h"
+
+template<class T>
+impl<T> *params<T>::runner() const {
+	switch(implementation) {
+		case CPU_IMPL: return new chambolle_pock<CPU_IMPL, T>(*this);
+		case GPU_IMPL: return new chambolle_pock<GPU_IMPL, T>(*this);
+		default: throw std::runtime_error("Unsupported implementation");
+	}
+}
 
 #endif

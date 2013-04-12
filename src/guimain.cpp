@@ -18,19 +18,21 @@ using namespace Gdk;
 using namespace Glib;
 using namespace sigc;
 
+typedef float T;
+
 
 struct main_window : Gtk::ApplicationWindow {
-	chambolle_pock *const p;
+	params<T> *const p;
 	RefPtr<Pixbuf> input_image;
 
-	SpinButton alpha_value, tau_value, gamma_value, sigma_value, max_steps_value;
+	SpinButton alpha_value, tau_value, sigma_value, max_steps_value;
 	Statusbar statusbar;
 	Spinner progress;
 	Notebook notebook;
 	Image original_image, output_image;
 
 	struct cc : TreeModel::ColumnRecord {
-		TreeModelColumn<string> kernel;
+		TreeModelColumn<size_t> kernel;
 		cc() { add(kernel); }
 	} constraints_columns;
 	RefPtr<ListStore> constraints_model;
@@ -48,14 +50,13 @@ struct main_window : Gtk::ApplicationWindow {
 	RefPtr<Action> add_constraint, remove_constraint, load_image, run;
 	RefPtr<ToggleAction> use_cl, use_debug;
 
-	vector<debug_state> current_log, previous_log;
+	vector<debug_state<T>> current_log, previous_log;
 	Dispatcher algorithm_done;
 
-	main_window(chambolle_pock *p)
+	main_window(params<T> *p)
 	: p(p),
 	  alpha_value{Adjustment::create(p->alpha, 0, 1), 0, 2},
 	  tau_value{Adjustment::create(p->tau, 0, 1000), 0, 2},
-	  gamma_value{Adjustment::create(p->gamma, -5, 5), 0, 2},
 	  sigma_value{Adjustment::create(p->sigma, 0, 5), 0, 2},
 	  max_steps_value{Adjustment::create(p->max_steps, 1, 100)},
 	  constraints_model{ListStore::create(constraints_columns)},
@@ -105,11 +106,8 @@ struct main_window : Gtk::ApplicationWindow {
 		auto tau_label = manage(new Label("τ", ALIGN_START));
 		options->attach(*tau_label, 0, 0, 1, 1);
 		options->attach_next_to(tau_value, *tau_label, POS_RIGHT, 1, 1);
-		auto gamma_label = manage(new Label("γ", ALIGN_START));
-		options->attach_next_to(*gamma_label, *tau_label, POS_BOTTOM, 1, 1);
-		options->attach_next_to(gamma_value, *gamma_label, POS_RIGHT, 1, 1);
 		auto sigma_label = manage(new Label("σ", ALIGN_START));
-		options->attach_next_to(*sigma_label, *gamma_label, POS_BOTTOM, 1, 1);
+		options->attach_next_to(*sigma_label, *tau_label, POS_BOTTOM, 1, 1);
 		options->attach_next_to(sigma_value, *sigma_label, POS_RIGHT, 1, 1);
 		auto max_steps_label = manage(new Label("Steps", ALIGN_START));
 		options->attach_next_to(*max_steps_label, *sigma_label, POS_BOTTOM, 1, 1);
@@ -118,23 +116,22 @@ struct main_window : Gtk::ApplicationWindow {
 		// Connect to model
 		alpha_value.signal_value_changed().connect([=]{ p->alpha = alpha_value.get_value(); });
 		tau_value.signal_value_changed().connect([=]{ p->tau = tau_value.get_value(); });
-		gamma_value.signal_value_changed().connect([=]{ p->gamma = gamma_value.get_value(); });
 		sigma_value.signal_value_changed().connect([=]{ p->sigma = sigma_value.get_value(); });
 		max_steps_value.signal_value_changed().connect([=]{ p->max_steps = max_steps_value.get_value(); });
 
-		use_cl->set_active(p->opencl);
-		use_cl->signal_toggled().connect([=]{ p->opencl = use_cl->get_active(); });
-		use_debug->set_active(p->opencl);
+		use_cl->set_active(p->implementation == GPU_IMPL);
+		use_cl->signal_toggled().connect([=]{ p->implementation = use_cl->get_active() ? GPU_IMPL : CPU_IMPL; });
+		use_debug->set_active(p->debug);
 		use_debug->signal_toggled().connect([=]{ p->debug = use_debug->get_active(); });
 
 		// Constraints Table
-		for(auto cons : p->constraints) {
+		for(auto cons : p->kernel_sizes) {
 			auto row = *constraints_model->append();
-			row[constraints_columns.kernel] = cons.expr;
+			row[constraints_columns.kernel] = cons;
 		}
 		add_constraint->signal_activate().connect([&]{
 			auto row = *constraints_model->append();
-			row[constraints_columns.kernel] = "box:3";
+			row[constraints_columns.kernel] = 3;
 		});
 		toolbar->append(*add_constraint->create_tool_item());
 		constraints_menu.append(*add_constraint->create_menu_item());
@@ -221,23 +218,22 @@ struct main_window : Gtk::ApplicationWindow {
 		progress.show();
 
 		// Actually create constraints now.
-		p->constraints.clear();
+		p->kernel_sizes.clear();
 		for(TreeRow r : constraints_model->children()) {
 			const auto ks = r.get_value(constraints_columns.kernel);
-			p->constraints.push_back(constraint(ks));
+			p->kernel_sizes.push_back(ks);
 		}
 
 		// start thread
 		Threads::Thread::create([=/* & doesn't work with threads */]{
 			// The image to process
 			auto input = pixbuf_to_multi_array(input_image);
-
-			// run
-			auto run_p = *p;
-			auto result = run_p.run(input);
+			p->set_size(input.shape());
+			auto run_p = p->runner();
+			auto result = run_p->run(input);
 			if(p->debug) {
 				swap(current_log, previous_log);
-				swap(current_log, run_p.debug_log);
+				swap(current_log, run_p->debug_log);
 			}
 			output_image.set(multi_array_to_pixbuf(result));
 
@@ -277,16 +273,29 @@ struct app_t : Gtk::Application {
 	RefPtr<Pixbuf> input_image;
 	main_window *main;
 
-	// parameters.
-	chambolle_pock *p;
+	params<T> *p;
+	vex::Context clctx;
 
-	app_t() : Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE), input_image(), main(NULL), p(new chambolle_pock()) {}
+
+	app_t()
+	: Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE),
+	  input_image(), main(NULL),
+	  p(new params<T>()),
+	  clctx(vex::Filter::Count(1)) {}
 
 	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
 		if(!has_value) return false;
-		for(auto k : constraints_from_string(value))
-			p->constraints.push_back(k);
+		auto c = constraints_from_string(value);
+		copy(c.begin(), c.end(), back_inserter(p->kernel_sizes));
 		return true;
+	}
+
+	bool parse_impl(const ustring &, const ustring &value, bool has_value) {
+		if(!has_value) return false;
+		if(value == "gpu") p->implementation = GPU_IMPL;
+		else if(value == "cpu") p->implementation = CPU_IMPL;
+		else throw invalid_argument("Only 'gpu' or 'cpu' accepted.");
+		return true;	
 	}
 
 	int on_command_line(const RefPtr<ApplicationCommandLine> &cmd) {
@@ -294,18 +303,15 @@ struct app_t : Gtk::Application {
 		OptionContext ctx("[FILE]");
 		OptionGroup group("params", "default parameters", "longer");
 
-		group.add_entry(entry("alpha", "initial value for alpha"), p->alpha);
-		group.add_entry(entry("tau", "initial value for tau"), p->tau);
-		group.add_entry(entry("sigma", "initial value for sigma"), p->sigma);
-		group.add_entry(entry("gamma", "initial value for gamma"), p->gamma);
-		group.add_entry(entry("steps", "number of iteration steps"), p->max_steps);
-		group.add_entry(entry("opencl", "use opencl implementation"), p->opencl);
-		group.add_entry(entry("mc-steps", "number of Monte Carlo steps"), p->monte_carlo_steps);
+		group.add_entry(entry("alpha", "initial value for alpha"), (double&)p->alpha);
+		group.add_entry(entry("tau", "initial value for tau"), (double&)p->tau);
+		group.add_entry(entry("sigma", "initial value for sigma"), (double&)p->sigma);
+		group.add_entry(entry("steps", "number of iteration steps"), (int&)p->max_steps);
+		group.add_entry(entry("impl", "'gpu' for OpenCL or 'cpu' for OpenMP."), mem_fun(*this, &app_t::parse_impl));
+		group.add_entry(entry("mc-steps", "number of Monte Carlo steps"), (int&)p->monte_carlo_steps);
 		group.add_entry(entry("no-cache", "don't use the monte carlo cache"), p->no_cache);
 		group.add_entry(entry("debug", "enable debug output"), p->debug);
-
-		group.add_entry(entry("constraint", "kernels 'box:SIZE' or 'gauss:SIGMA'"),
-			mem_fun(*this, &app_t::parse_constraint));
+		group.add_entry(entry("constraint", "kernels 'box:SIZE' or 'gauss:SIGMA'"), mem_fun(*this, &app_t::parse_constraint));
 
 		string output_file;
 		group.add_entry_filename(entry("output", "save output PNG here (runs without GUI)."), output_file);
@@ -325,14 +331,19 @@ struct app_t : Gtk::Application {
 			files.push_back(File::create_for_commandline_arg(argv[i]));
 		if(!files.empty()) open(files);
 
+		// init OpenCL
+		vex::StaticContext<>::set(clctx);
+		cerr << "CL context:" << clctx << endl;
+
 		// run.
 		if(output_file.empty())
 			activate(); // show the gui.
 		else if(input_image) {
 			// CLI mode.
 			auto input = pixbuf_to_multi_array(input_image);
-			auto run_p = *p;
-			auto output = run_p.run(input);
+			p->set_size(input.shape());
+			auto run_p = p->runner();
+			auto output = run_p->run(input);
 			multi_array_to_pixbuf(output)->save(output_file, "png");
 		} else {
 			cmd->printerr("When using --output, you must specify an input image, too.");

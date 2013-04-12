@@ -1,8 +1,5 @@
 # Stick common SMRE stuff into a library, used by tests etc.
 set(BASE_SRC
-	chambolle_pock.cpp
-		chambolle_pock_cl.cpp
-		chambolle_pock_cpu.cpp
 	${CL_OUTPUT}
 )
 
@@ -20,3 +17,6 @@ if(WITH_GUI)
 	add_executable(guimain guimain.cpp ${BASE_SRC})
 	target_link_libraries(guimain ${CMAKE_REQUIRED_LIBRARIES})
 endif()
+
+add_executable(benchmark benchmark.cpp ${BASE_SRC})
+target_link_libraries(benchmark ${CMAKE_REQUIRED_LIBRARIES})

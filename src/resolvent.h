@@ -6,6 +6,8 @@
 #include <iostream>
 #include "multi_array.h"
 #include "multi_array_fft.h"
+#include <vexcl/vexcl.hpp>
+#include "multi_array_operators.h"
 
 /**
  * abstract resolvent class. It implements the l2 resolvent as default, i.e.
@@ -25,24 +27,19 @@
  * resolvent class, have to implement the evaluation of the resolvent.
  */
 
-class resolvent{
-protected:
-	// resolvent parameter
-	float tau;
-public:
-	resolvent(): tau(1) {}
-	resolvent(const float tau): tau(tau) {}
+template<class T>
+struct resolvent {
+	const T gamma;
+	resolvent(T gamma = 1): gamma(gamma) {}
 
-	inline void update_param(const float new_tau){ tau = new_tau; }
-	virtual boost::multi_array<float, 2> evaluate(const boost::multi_array<float, 2> arg){
-		boost::multi_array<float, 2> out(arg);
-		const auto size = boost::extents_of(arg);
-		const auto width = size[0], height = size[1];
-		for(size_t ix = 0 ; ix <width ; ix++)
-			for(size_t iy = 0 ; iy < height ; iy++)
-				out[ix][iy] = arg[ix][iy]/(1+tau);
+	virtual void evaluate(T tau, const boost::multi_array<T, 2> &in, boost::multi_array<T, 2> &out) {
+		using namespace mimas;
+		out = in;
+		out /= 1 + tau;
+	}
 
-		return(out);
+	virtual void evaluate(T tau, const vex::vector<T> &in, vex::vector<T> &out) {
+		out = in / (1 + tau);
 	}
 };
 
@@ -57,47 +54,43 @@ public:
  * The DCT I/III is used for fast implementation.
  */
 
+template<class T>
 class helmholtz{
 
 protected:
 	// dimension
 	size_t m,n;
 	// discrete cosine transform of the laplacian
-	boost::multi_array<float, 2> laplace_dct;
+	boost::multi_array<T, 2> laplace_dct;
+	fftw::plan<float, float, 2> dct, idct;
 
 public:
-	helmholtz(): m(1), n(1), laplace_dct(boost::extents[1][1]) {}
-	helmholtz(const int m, const int n) : m(m), n(n), laplace_dct(boost::extents[m][n]) {
+	helmholtz(const size_t m, const size_t n)
+	: m(m), n(n),
+	  laplace_dct(boost::extents[m][n]),
+	  dct(boost::extents[m][n], fftw::forward),
+	  idct(boost::extents[m][n], fftw::inverse) {
+		fftw::plan<float, float, 1> dct_m(boost::extents[m]), dct_n(boost::extents[n]);
 		boost::multi_array<float, 1> eye1(boost::extents[m]), eye2(boost::extents[n]);
 		boost::multi_array<float, 1> dl1(eye1), de1(eye1), dl2(eye2), de2(eye2);
 		fill(eye1,0.0); fill(eye2,0.0);
 
 		eye1[0] = -1.0, eye1[1] = 1.0, eye2[0] = -1.0, eye2[1] = 1.0;
-		fftw::forward(eye1,dl1)();
-		fftw::forward(eye2,dl2)();
+		dct_m(eye1, dl1);
+		dct_n(eye2, dl2);
 
 		eye1[0] = 1.0, eye1[1] = 0.0, eye2[0] = 1.0, eye2[1] = 0.0;
-		fftw::forward(eye1,de1)();
-		fftw::forward(eye2,de2)();
+		dct_m(eye1, de1);
+		dct_n(eye2, de2);
 
-
-		for(int i=0; i<m; i++)
-			for(int j=0; j<n; j++)
+		for(size_t i=0; i<m; i++)
+			for(size_t j=0; j<n; j++)
 				laplace_dct[i][j] = dl1[i]/de1[i] + dl2[j]/de2[j];
-
 	};
-
-	//	void set_rhs(boost::multi_array<float, 2> & new_rhs){
-	//		for(size_t i = 0 ; i < 2 ; i++)
-	//			if(rhs.shape()[i] != new_rhs.shape()[i])
-	//				throw std::invalid_argument("Input and output arrays must be of same size.");
-	//		rhs = new_rhs;
-	//	};
-	//	void set_alpha(float new_alpha){alpha = new_alpha;};
 
 	boost::multi_array<float, 2> solve(const boost::multi_array<float, 2> rhs, const float alpha){
 		boost::multi_array<float, 2> rhs_dct(rhs), tmp(rhs), res(rhs);
-		fftw::forward(rhs, rhs_dct)();
+		dct(rhs, rhs_dct);
 
 		float m=rhs.shape()[1], n=rhs.shape()[2];
 		float factor = 1/(4*m*n);
@@ -106,7 +99,7 @@ public:
 			for(size_t j=0; j<n; j++)
 				tmp[i][j] = factor*rhs_dct[i][j] / (laplace_dct[i][j]-alpha);
 
-		fftw::backward(tmp, res)();
+		idct(tmp, res);
 		return(res);
 
 	}
@@ -136,20 +129,23 @@ public:
  * \f}
  */
 
-class h1resolvent : public helmholtz, public resolvent{
+template<class T>
+class h1resolvent : public helmholtz<T>, public resolvent<T> {
 private:
-	float delta;
+	T delta;
 public:
-	h1resolvent() : helmholtz(), resolvent(),  delta(0) {}
-	h1resolvent(const int m, const int n, const float delta, const float tau) : helmholtz(m,n), resolvent(tau), delta(delta) {}
+	h1resolvent(const int m, const int n, const T delta, const T tau) : helmholtz<T>(m,n), resolvent<T>(tau, 1 - delta), delta(delta) {}
 
-	boost::multi_array<float, 2> evaluate(const boost::multi_array<float, 2> arg){
-		float alpha = (1+tau*(1-delta))/(tau*delta);
-		boost::multi_array<float, 2> rhs(arg);
-		for(size_t ix = 0 ; ix < m ; ix++)
-			for(size_t iy = 0 ; iy < n ; iy++)
-				rhs[ix][iy] = -arg[ix][iy]/(tau*delta);
-		return(solve(rhs, alpha));
+	virtual void evaluate(T tau, const boost::multi_array<T, 2> &in, boost::multi_array<T, 2> &out) {
+		T alpha = (1 + tau * (1 - delta)) / (tau * delta);
+		out = in / (-tau * delta);
+		solve(out, alpha);
+	}
+
+	virtual void evaluate(T tau, const vex::vector<T> &in, vex::vector<T> &out) {
+		T alpha = (1 + tau * (1 - delta)) / (tau * delta);
+		out = in / (-tau * delta);
+		solve(out, alpha);
 	}
 };
 

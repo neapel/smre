@@ -11,153 +11,139 @@ extern "C" {
 
 namespace fftw {
 
-template<class In, class Out>
-std::array<int, In::dimensionality> get_shape(const In &in, const Out &out) {
-	const size_t N = In::dimensionality;
-	static_assert(N == Out::dimensionality, "Arrays must have same rank.");
-	if(!is_continuous(in) || !is_continuous(out))
-		throw std::invalid_argument("Only continuous arrays are supported.");
-	for(size_t i = 0 ; i < N ; i++)
-		if(in.index_bases()[i] != 0 || out.index_bases()[i] != 0)
-			throw std::invalid_argument("Nonzero bases are not supported.");
-	std::array<int, N> shape;
-	for(size_t i = 0 ; i < N ; i++)
-		shape[i] = static_cast<int>(std::max(in.shape()[i], out.shape()[i]));
-	return shape;
-}
+enum dir_t { forward, inverse };
 
-struct plan {
-	fftwf_plan p;
+template<class T> struct fftw_map {};
+template<> struct fftw_map<float> { typedef float type; };
+template<> struct fftw_map<std::complex<float>> { typedef fftwf_complex type; };
 
-	plan() : p(NULL) {}
-
-	// pass ownership
-	plan(plan &other) : p(other.p) { other.p = NULL; }
-	plan(plan &&other) : p(other.p) { other.p = NULL; }
-	plan &operator=(plan &other) { p = other.p; other.p = NULL; return *this; }
-	plan &operator=(plan &&other) { p = other.p; other.p = NULL; return *this; }
-
-	/** Complex to Complex FFT. */
-	template<size_t dims>
-	plan(const boost::multi_array<std::complex<float>, dims> &in, boost::multi_array<std::complex<float>, dims> &out, int dir, unsigned int flags) {
-		switch(dir) {
-		case FFTW_FORWARD: break;
-		case FFTW_BACKWARD: break;
-		default: throw std::invalid_argument("Only C2C Fourier transform.");
-		}
-		auto shape = get_shape(in, out);
-		for(size_t i = 0 ; i < dims ; i++)
-			if(in.shape()[i] != out.shape()[i])
-				throw std::invalid_argument("Input and output arrays must be of same size.");
-
-#pragma omp critical
-		p = fftwf_plan_dft(dims, shape.data(),
-				const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
-				reinterpret_cast<fftwf_complex *>(out.origin()), dir, flags);
+template<size_t dims>
+struct size_a {
+	std::array<int, dims> d, real;
+	template<class I>
+	size_a(I size) {
+		for(size_t i = 0 ; i < dims ; i++) d[i] = size[i];
+		for(size_t i = 0 ; i < dims - 1 ; i++) real[i] = size[i];
+		real[dims - 1] = size[dims - 1] / 2 + 1;
 	}
-
-	/** Real to Complex FFT. */
-	template<size_t dims>
-	plan(const boost::multi_array<float, dims> &in, boost::multi_array<std::complex<float>, dims> &out, int dir, unsigned int flags) {
-		if(dir != FFTW_FORWARD)
-			throw std::invalid_argument("R2C transform must be forward.");
-		auto shape = get_shape(in, out);
-		if(out.shape()[dims-1] != in.shape()[dims-1] / 2 + 1)
-			throw std::invalid_argument("Width of output must be input width/2 + 1");
-		for(size_t i = 0 ; i < dims-1 ; i++)
-			if(in.shape()[i] != out.shape()[i])
-				throw std::invalid_argument("Other dimensions must be same size.");
-
-#pragma omp critical
-		p = fftwf_plan_dft_r2c(dims, shape.data(), const_cast<float *>(in.origin()),
-				reinterpret_cast<fftwf_complex *>(out.origin()), flags);
-	}
-
-	/** Complex to Real FFT. */
-	template<size_t dims>
-	plan(const boost::multi_array<std::complex<float>, dims> &in, boost::multi_array<float, dims> &out, int dir, unsigned int flags) {
-		if(dir != FFTW_BACKWARD)
-			throw std::invalid_argument("C2R transform must be backward.");
-		auto shape = get_shape(in, out);
-		if(in.shape()[dims-1] != out.shape()[dims-1] / 2 + 1)
-			throw std::invalid_argument("Width of input must be output width/2 + 1");
-		for(size_t i = 0 ; i < dims-1 ; i++)
-			if(in.shape()[i] != out.shape()[i])
-				throw std::invalid_argument("Other dimensions must be same size.");
-
-#pragma omp critical
-		p = fftwf_plan_dft_c2r(dims, shape.data(),
-				const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())),
-				out.origin(), flags);
-	}
-
-	/** Real to Real FFT. */
-	template<size_t dims>
-	plan(const boost::multi_array<float, dims> &in, boost::multi_array<float, dims> &out, int dir, unsigned int flags) {
-		fftw_r2r_kind kind[dims];
-		switch(dir) {
-		case FFTW_FORWARD:
-			for(size_t k = 0; k < dims; k++)
-				kind[k] = FFTW_REDFT10;
-			break;
-		case FFTW_BACKWARD:
-			for(size_t k = 0; k < dims; k++)
-				kind[k] = FFTW_REDFT01;
-			break;
-		default: throw std::invalid_argument("Only R2R Fourier transform.");
-		}
-		auto shape = get_shape(in, out);
-		for(size_t i = 0 ; i < dims ; i++)
-			if(in.shape()[i] != out.shape()[i])
-				throw std::invalid_argument("Input and output arrays must be of same size.");
-
-		p = fftwf_plan_r2r(dims, shape.data(),
-				const_cast<float *>(in.origin()), out.origin(), kind, flags);
-	}
-
-	/** Execute the plan with the original arrays */
-	void operator()() {
-		fftwf_execute(p);
-	}
-
-	/** Execute with new arrays. Must look exactly the same as the originals. */
-	template<size_t dims>
-	void operator()(const boost::multi_array<std::complex<float>, dims> &in, boost::multi_array<std::complex<float>, dims> &out) {
-		fftwf_execute_dft(p, const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())), reinterpret_cast<fftwf_complex *>(out.origin()));
-	}
-
-	template<size_t dims>
-	void operator()(const boost::multi_array<float, dims> &in, boost::multi_array<std::complex<float>, dims> &out) {
-		fftwf_execute_dft_r2c(p, const_cast<float *>(in.origin()), reinterpret_cast<fftwf_complex *>(out.origin()));
-	}
-
-	template<size_t dims>
-	void operator()(const boost::multi_array<std::complex<float>, dims> &in, boost::multi_array<float, dims> &out) {
-		fftwf_execute_dft_c2r(p, const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())), out.origin());
-	}
-
-	template<size_t dims>
-	void operator()(const boost::multi_array<float, dims> &in, boost::multi_array<float, dims> &out) {
-		fftwf_execute_r2r(p, const_cast<fftwf_complex *>(reinterpret_cast<const fftwf_complex *>(in.origin())), out.origin());
-	}
-
-	/** Destroy the plan. */
-	~plan() {
-		if(p != NULL)
-#pragma omp critical
-			fftwf_destroy_plan(p);
+	operator const int*() {
+		return d.data();
 	}
 };
 
-template<class In, class Out>
-plan forward(const In &in, Out &out, unsigned int flags = FFTW_ESTIMATE) {
-	return {in, out, FFTW_FORWARD, flags};
+// Data as fftw-compatible pointers.
+template<class T, size_t dims>
+typename fftw_map<T>::type *data(boost::multi_array<T, dims> &in) {
+	return reinterpret_cast<typename fftw_map<T>::type *>(in.data());
 }
 
-template<class In, class Out>
-plan backward(const In &in, Out &out, unsigned int flags = FFTW_ESTIMATE) {
-	return {in, out, FFTW_BACKWARD, flags};
+template<class T, size_t dims>
+typename fftw_map<T>::type *data(const boost::multi_array<T, dims> &in) {
+	typedef typename fftw_map<T>::type U;
+	return const_cast<U *>(reinterpret_cast<const U*>(in.data()));
 }
+
+#define common()\
+	typedef boost::multi_array<T0, dims> A0; \
+	typedef boost::multi_array<T1, dims> A1; \
+	typedef plan<T0, T1, dims> this_t; \
+	fftwf_plan p; \
+	plan() : p(NULL) {} \
+	plan(this_t &other) : p(other.p) { other.p = NULL; } \
+	plan(this_t &&other) : p(other.p) { other.p = NULL; } \
+	this_t &operator=(this_t &other) { p = other.p; other.p = NULL; return *this; } \
+	this_t &operator=(this_t &&other) { p = other.p; other.p = NULL; return *this; } \
+	~plan() { \
+		if(p != NULL) \
+			fftwf_destroy_plan(p); \
+	}
+
+template<class T0, class T1, size_t dims>
+struct plan {};
+
+template<size_t dims>
+struct plan<float, float, dims> {
+	typedef float T0;
+	typedef float T1;
+	common()
+
+	template<class I>
+	plan(I size, dir_t dir = forward, unsigned int flags = 0) {
+		size_a<dims> sz(size);
+		A0 in(size);
+		A1 out(size);
+		fftw_r2r_kind kind[dims];
+		for(size_t i = 0 ; i < dims ; i++)
+			kind[i] = dir == forward ? FFTW_REDFT10 : FFTW_REDFT01;
+		#pragma omp critical
+		p = fftwf_plan_r2r(dims, sz, data(in), data(out), kind, flags);
+	}
+
+	void operator()(const A0 &in, A1 &out) {
+		fftwf_execute_r2r(p, data(in), data(out));
+	}
+};
+
+template<size_t dims>
+struct plan<float, std::complex<float>, dims> {
+	typedef float T0;
+	typedef std::complex<float> T1;
+	common()
+
+	template<class I>
+	plan(I size, unsigned int flags = 0) {
+		size_a<dims> sz(size);
+		A0 in(sz.real);
+		A1 out(size);
+		#pragma omp critical
+		p = fftwf_plan_dft_r2c(dims, sz, data(in), data(out), flags);
+	}
+
+	void operator()(const A0 &in, A1 &out) {
+		fftwf_execute_dft_r2c(p, data(in), data(out));
+	}
+};
+
+template<size_t dims>
+struct plan<std::complex<float>, std::complex<float>, dims> {
+	typedef std::complex<float> T0;
+	typedef std::complex<float> T1;
+	common()
+
+	template<class I>
+	plan(I size, dir_t dir = forward, unsigned int flags = 0) {
+		size_a<dims> sz(size);
+		A0 in(size);
+		A1 out(size);
+		p = fftwf_plan_dft(dims, sz, data(in), data(out),
+			dir == forward ? FFTW_FORWARD : FFTW_BACKWARD, flags);
+	}
+
+	void operator()(const A0 &in, A1 &out) {
+		fftwf_execute_dft(p, data(in), data(out));
+	}
+};
+
+template<size_t dims>
+struct plan<std::complex<float>, float, dims> {
+	typedef std::complex<float> T0;
+	typedef float T1;
+	common()
+
+	template<class I>
+	plan(I size, unsigned int flags = 0) {
+		size_a<dims> sz(size);
+		A0 in(size);
+		A1 out(sz.real);
+		#pragma omp critical
+		p = fftwf_plan_dft_c2r(dims, sz, data(in), data(out), flags);
+	}
+
+	void operator()(const A0 &in, A1 &out) {
+		fftwf_execute_dft_c2r(p, data(in), data(out));
+	}
+};
+
 
 }
 #endif

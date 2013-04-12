@@ -14,9 +14,20 @@ void iota(A &a, I x = I()) {
 
 /** Fills an array with a value */
 template<class A>
-void fill(A &a, typename A::element x) {
-	mimas::multi_apply(a, [x](typename A::element &e){ e = x; });
+void fill(A &a, const typename A::element &x) {
+	mimas::multi_apply(a, [&x](typename A::element &e){ e = x; });
 }
+
+template<class A>
+void fill(A &a, const std::function<typename A::element()> &f) {
+	mimas::multi_apply(a, [&f](typename A::element &e){ e = f(); });
+}
+
+template<class A>
+A abs(A &a) {
+	return mimas::multi_func<typename A::element>(a, [](const typename A::element &e){return std::abs(e);});
+}
+
 
 
 /** Returns the minimum value from the array */

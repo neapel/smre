@@ -32,7 +32,7 @@ endif()
 
 # Boost libraries
 find_package(Boost
-	COMPONENTS regex filesystem system
+	COMPONENTS regex filesystem system chrono
 	REQUIRED)
 if(Boost_FOUND)
 	include_directories(${Boost_INCLUDE_DIRS})
@@ -54,7 +54,7 @@ endif()
 
 # General compiler flags
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fopenmp -Wall")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fopenmp -Wall -Werror -Wuninitialized -Wmaybe-uninitialized -Winit-self")
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3")
 	set(HAVE_OPENMP 1)
 endif()
