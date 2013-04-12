@@ -23,6 +23,11 @@ enum impl_t {
 	CPU_IMPL, GPU_IMPL
 };
 
+typedef std::array<size_t, 2> size2_t;
+
+
+#include "resolvent.h"
+
 
 template<class T>
 struct debug_state {
@@ -53,8 +58,6 @@ struct debug_state {
  * 	\f}
  */
 
-typedef std::array<size_t, 2> size2_t;
-
 template<class T>
 struct impl;
 
@@ -66,9 +69,11 @@ struct params {
 	impl_t implementation;
 	std::vector<size_t> kernel_sizes;
 	size2_t size;
+	resolvent_params<T> *resolvent;
+
 
 	params(size2_t size = {{0,0}}, std::vector<size_t> kernel_sizes = std::vector<size_t>(), T alpha = 0.5, T tau = 50, T sigma = 1)
-	: alpha(alpha), tau(tau), sigma(sigma), implementation(CPU_IMPL), kernel_sizes(kernel_sizes), size(size) {}
+	: alpha(alpha), tau(tau), sigma(sigma), implementation(CPU_IMPL), kernel_sizes(kernel_sizes), size(size), resolvent(new resolvent_l2_params<T>()) {}
 
 	impl<T> *runner() const;
 

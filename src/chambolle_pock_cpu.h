@@ -49,6 +49,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 	T total_norm;
 	A2 temp;
 	std::vector<constraint> constraints;
+	resolvent_impl<CPU_IMPL, T> *resolvent;
 
 
 	chambolle_pock(const params<T> &p)
@@ -56,7 +57,8 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 	  fft(p.size), ifft(p.size),
 	  fft_size{{p.size[0], p.size[1]/2+1}},
 	  scale(1.0 / (p.size[0] * p.size[1])),
-	  temp(fft_size) {
+	  temp(fft_size),
+	  resolvent(p.resolvent->cpu_runner(p.size)) {
 		update_kernels();
 	}
 
@@ -165,15 +167,6 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		T tau = p.tau;
 		T sigma = p.sigma;
 
-#ifdef USE_RESOLVENT_H1
-		// init the resolvent (h1)
-		float delta = 0.5;
-		h1resolvent<T> resolv(p.size[1], p.size[0], p.delta, tau);
-#else
-		// init the resolvent (l2)
-		resolvent<T> resolv(tau);
-#endif
-
 		// Adjust sigma with norm.
 		std::cerr << "s'=" << sigma << " tau=" << tau << " totalnorm=" << total_norm << std::endl;
 		sigma /= tau * total_norm;
@@ -210,10 +203,10 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			bar_x -= w;
 			bar_x -= Y;
 			debug(bar_x,n)
-			resolv.evaluate(tau, bar_x, x);
+			resolvent->evaluate(tau, bar_x, x);
 			x += Y;
 			debug(x,n)
-			const T theta = 1 / sqrt(1 + 2 * tau * resolv.gamma);
+			const T theta = 1 / sqrt(1 + 2 * tau * resolvent->gamma);
 			tau *= theta;
 			sigma /= theta;
 			bar_x = x;

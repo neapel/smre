@@ -294,8 +294,16 @@ struct app_t : Gtk::Application {
 		if(!has_value) return false;
 		if(value == "gpu") p->implementation = GPU_IMPL;
 		else if(value == "cpu") p->implementation = CPU_IMPL;
-		else throw invalid_argument("Only 'gpu' or 'cpu' accepted.");
+		else return false;
 		return true;	
+	}
+
+	bool parse_resolvent(const ustring &, const ustring &value, bool has_value) {
+		if(!has_value) return false;
+		if(value == "l2") p->resolvent = new resolvent_l2_params<T>();
+		else if(value == "h1") p->resolvent = new resolvent_h1_params<T>();
+		else return false;
+		return true;
 	}
 
 	int on_command_line(const RefPtr<ApplicationCommandLine> &cmd) {
@@ -311,7 +319,8 @@ struct app_t : Gtk::Application {
 		group.add_entry(entry("mc-steps", "number of Monte Carlo steps"), (int&)p->monte_carlo_steps);
 		group.add_entry(entry("no-cache", "don't use the monte carlo cache"), p->no_cache);
 		group.add_entry(entry("debug", "enable debug output"), p->debug);
-		group.add_entry(entry("constraint", "kernels 'box:SIZE' or 'gauss:SIGMA'"), mem_fun(*this, &app_t::parse_constraint));
+		group.add_entry(entry("constraint", "kernel sizes, comma separated list or '<start>,<next>,...,<end>'"), mem_fun(*this, &app_t::parse_constraint));
+		group.add_entry(entry("resolvent", "'l2' or 'h1'"), mem_fun(*this, &app_t::parse_resolvent));
 
 		string output_file;
 		group.add_entry_filename(entry("output", "save output PNG here (runs without GUI)."), output_file);
