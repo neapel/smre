@@ -297,7 +297,7 @@ struct app_t : Gtk::Application {
 
 	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
 		if(!has_value) return false;
-		auto c = constraints_from_string(value);
+		auto c = list_expression(value);
 		copy(c.begin(), c.end(), back_inserter(p->kernel_sizes));
 		return true;
 	}

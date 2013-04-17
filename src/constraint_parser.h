@@ -1,7 +1,6 @@
 #ifndef __CONSTRAINT_PARSER_H__
 #define __CONSTRAINT_PARSER_H__
 
-#include "chambolle_pock.h"
 #include <boost/regex.hpp>
 #include <boost/lexical_cast.hpp>
 
@@ -18,32 +17,50 @@ namespace std {
 }
 
 
-// parse a kernel list expression: "<kind>:<size0>[,<size1>,...,<sizeN>]"
-std::vector<size_t> constraints_from_string(std::string expr) {
+// parse a list expression:
+//   <expr> = <pow> | <expr>;<expr>
+//   <pow> = <list> | <base>^<list> | <base>**<list>
+//   <list> = {<number>,}<number>
+//          | <number:start>,[<number:next>,]...,<number:end>
+std::vector<size_t> list_expression(std::string expr) {
 	using namespace boost;
-	std::vector<size_t> sizes;
-	regex r("(?<start>\\d+)((?<list>(,(\\d+))+)|((,(?<next>\\d+))?,\\.{2,},(?<end>\\d+)))?");
-	smatch m;
-	if(regex_match(expr, m, r)) {
+	using namespace std;
+	vector<size_t> expr_l;
+	regex r_pow("((?<base>\\d+)(\\^|\\*\\*))?(?<start>\\d+)((?<list>(,(\\d+))+)|((,(?<next>\\d+))?,?\\.{2,},?(?<end>\\d+)))?");
+	regex r_expr("[;:+]"), r_list("\\d+");
+	for(auto s_pow : make_regex_token_iterator(expr, r_expr, -1)) {
+		auto s = s_pow.str(); // mandatory??? regex_match(s_pow.str()...) breaks.
+		smatch m;
+		if(!regex_match(s, m, r_pow))
+			throw invalid_argument("invalid list expression.");
 		auto start = lexical_cast<size_t>(m["start"]);
-		sizes.push_back(start);
-		auto list_m = m["list"], next_m = m["next"], end_m = m["end"];
+		vector<size_t> pow_l;
+		pow_l.push_back(start);
+		auto base_m = m["base"], list_m = m["list"], next_m = m["next"], end_m = m["end"];
 		if(list_m.matched) {
-			regex split("\\d+");
-			for(auto i : make_regex_token_iterator(list_m.str(), split))
-				sizes.push_back(lexical_cast<size_t>(i));
+			for(auto i : make_regex_token_iterator(list_m.str(), r_list)) {
+				pow_l.push_back(lexical_cast<size_t>(i.str()));
+			}
 		} else if(end_m.matched) {
 			auto next = next_m.matched ? lexical_cast<size_t>(next_m) : start + 1;
 			auto end = lexical_cast<size_t>(end_m);
 			if(end <= start || next <= start || end <= next)
-				throw std::invalid_argument("invalid kernels range.");
+				throw invalid_argument("invalid list range.");
 			auto delta = next - start;
 			for(size_t i = next ; i <= end ; i += delta)
-				sizes.push_back(i);
+				pow_l.push_back(i);
 		}
-		return sizes;
+		if(base_m.matched) {
+			auto base = lexical_cast<size_t>(base_m);
+			for(auto &v : pow_l)
+				v = pow(base, v);
+		}
+		copy(pow_l.begin(), pow_l.end(), back_inserter(expr_l));
 	}
-	throw std::invalid_argument("invalid kernels expression.");
+	sort(expr_l.begin(), expr_l.end());
+	vector<size_t> out;
+	unique_copy(expr_l.begin(), expr_l.end(), back_inserter(out));
+	return out;
 }
 
 #endif
