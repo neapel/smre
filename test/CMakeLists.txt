@@ -19,15 +19,15 @@ set(MAT_DIR "${CMAKE_SOURCE_DIR}/matfiles")
 
 
 # multi_array <-> uBLAS adaptors
-tiny_test(test_multi_array_matrix)
-tiny_test(test_multi_array_vector)
+#tiny_test(test_multi_array_matrix)
+#tiny_test(test_multi_array_vector)
 
 # multi_array tools
-tiny_test(test_multi_array_operators)
-tiny_test(test_multi_array_print)
+#tiny_test(test_multi_array_operators)
+#tiny_test(test_multi_array_print)
 
 # multi_array <-> FFTw adaptors
-tiny_test(test_multi_array_fft)
+#tiny_test(test_multi_array_fft)
 
 # operator split
 #tiny_test(test_tuple_cut)
@@ -39,9 +39,9 @@ tiny_test(test_multi_array_fft)
 #endif()
 #tiny_test(test_plain_io)
 
-if(HAVE_GIL)
-	tiny_test(test_gil_io "${MAT_DIR}/rgb8.jpg")
-endif()
+#if(HAVE_GIL)
+#	tiny_test(test_gil_io "${MAT_DIR}/rgb8.jpg")
+#endif()
 
 # opencl
 #if(HAVE_OPENCL)
@@ -50,5 +50,6 @@ endif()
 #	tiny_test(test_opencl_fft)
 #endif()
 
-tiny_test(test_kernel_generator)
-tiny_test(test_resolvent)
+#tiny_test(test_kernel_generator)
+#tiny_test(test_resolvent)
+tiny_test(test_constraint_parser)

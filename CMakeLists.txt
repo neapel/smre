@@ -32,7 +32,7 @@ endif()
 
 # Boost libraries
 find_package(Boost
-	COMPONENTS regex filesystem system chrono
+	COMPONENTS regex filesystem system chrono program_options
 	REQUIRED)
 if(Boost_FOUND)
 	include_directories(${Boost_INCLUDE_DIRS})
@@ -83,6 +83,6 @@ add_subdirectory(src)
 
 
 # Tests
-if(BUILD_TESTING)
+#if(BUILD_TESTING)
 	add_subdirectory(test)
-endif()
+#endif()
