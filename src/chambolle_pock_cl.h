@@ -128,7 +128,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 
 	virtual boost::multi_array<T, 2> run(const boost::multi_array<T, 2> &Y__) {
 		auto Y_ = Y__;
-#if 1
+#if DEBUG_WATERMARK
 		for(size_t i0 = 0 ; i0 < 20 ; i0++)
 			for(size_t i1 = 0 ; i1 < 20 ; i1++)
 				Y_[i0 + 20][i1 + 20] = 0;
@@ -162,12 +162,10 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 		T sigma = p.sigma;
 
 		// Adjust sigma with norm.
-		std::cerr << "s'=" << sigma << " tau=" << tau << " totalnorm=" << total_norm << std::endl;
 		sigma /= tau * total_norm;
 
 		// Repeat until good enough.
 		for(size_t n = 0 ; n < p.max_steps ; n++) {
-			std::cerr << "s=" << sigma << " t=" << tau << std::endl;
 			// reset accumulator
 			w = 0.0f;
 			// transform bar_x for convolutions

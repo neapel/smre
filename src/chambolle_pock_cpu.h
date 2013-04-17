@@ -139,7 +139,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		using namespace mimas;
 
 		auto Y = Y_;
-#if 1
+#ifdef DEBUG_WATERMARK
 		for(size_t i0 = 0 ; i0 < 20 ; i0++)
 			for(size_t i1 = 0 ; i1 < 20 ; i1++)
 				Y[i0 + 20][i1 + p.size[1] - 40] = 0;		
@@ -161,12 +161,10 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		T sigma = p.sigma;
 
 		// Adjust sigma with norm.
-		std::cerr << "s'=" << sigma << " tau=" << tau << " totalnorm=" << total_norm << std::endl;
 		sigma /= tau * total_norm;
 
 		// Repeat until good enough.
 		for(size_t n = 0 ; n < p.max_steps ; n++) {
-			std::cerr << "s=" << sigma << " t=" << tau << std::endl;
 			// reset accumulator
 			fill(w, 0);
 			// transform bar_x for convolutions
