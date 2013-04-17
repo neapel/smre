@@ -67,7 +67,9 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		using namespace mimas;
 		constraints.clear();
 		total_norm = 0;
-		for(size_t k_size : p.kernel_sizes) {
+		//#pragma omp parallel for
+		for(size_t i = 0 ; i < p.kernel_sizes.size() ; i++) {
+			auto k_size = p.kernel_sizes[i];
 			const auto v = 1 / (M_SQRT2 * k_size);
 			A k(p.size), adj_k(p.size);
 			fill(k, 0);
@@ -85,7 +87,9 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			fft(k, c.f_k);
 			fft(adj_k, c.f_adj_k);
 			// Calculate max norm of transformed kernel
-			total_norm += max(norm<T>(c.f_k));
+			T maxnorm = max(norm<T>(c.f_k));
+			//#pragma omp critical
+			total_norm += maxnorm;
 		}
 
 		if(p.penalized_scan)
@@ -148,7 +152,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		const int original_threads = omp_get_num_threads();
 		if(p.debug) omp_set_num_threads(1);
 
-		A x(Y), bar_x(Y), old_x(p.size), w(p.size), convolved(p.size);
+		A x(Y), bar_x(Y), old_x(p.size), w(p.size);
 		A2 fft_bar_x(fft_size);
 
 		debug(x,0)
@@ -169,8 +173,11 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			fill(w, 0);
 			// transform bar_x for convolutions
 			fft(bar_x, fft_bar_x);
-			for(auto &c : constraints) {
+			#pragma omp parallel for
+			for(size_t i = 0 ; i < constraints.size() ; i++) {
+				auto &c = constraints[i];
 				// convolve bar_x with kernel
+				A convolved(p.size);
 				convolve(c.f_k, fft_bar_x, convolved);
 				debug(convolved,n)
 				// calculate new y_i
@@ -185,6 +192,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 				convolve(c.f_adj_k, c.y, convolved);
 				debug(convolved,n)
 				// accumulate
+				#pragma omp critical
 				w += convolved;
 				debug(w,n)
 			}
