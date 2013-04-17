@@ -107,29 +107,22 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 
 	void calc_q() {
 		using namespace std;
-		const T q = impl<T>::cached_q([&]{
-			vector<T> qs;
+		const T q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
 			A data(p.size), convolved(p.size);
 			A2 f_data(fft_size);
 			random_device dev;
 			mt19937 gen(dev());
 			normal_distribution<T> dist(/*mean*/0, /*stddev*/1);
 			for(size_t i = 0 ; i < p.monte_carlo_steps ; i++) {
-				// random image
 				for(auto row : data) for(auto &x : row) x = dist(gen);
 				fft(data, f_data);
-				// convolute with each kernel, find max value.
-				vector<T> k_qs;
-				for(const auto c : constraints) {
-					convolve(c.f_k, f_data, convolved);
+				for(size_t j = 0 ; j < constraints.size() ; j++) {
+					convolve(constraints[j].f_k, f_data, convolved);
 					auto norm_inf = max(abs(convolved));
-					auto k_q = norm_inf - c.shift_q;
-					k_qs.push_back(k_q);
+					auto k_q = norm_inf - constraints[j].shift_q;
+					k_qs[j].push_back(k_q);
 				}
-				auto max_q = *max_element(k_qs.begin(), k_qs.end());
-				qs.push_back(max_q);
 			}
-			return qs;
 		});
 		for(auto &c : constraints)
 			c.q = q + c.shift_q;

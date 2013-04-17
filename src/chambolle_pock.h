@@ -64,8 +64,8 @@ struct impl;
 template<class T>
 struct params {
 	size_t max_steps = 10, monte_carlo_steps = 1000;
-	T alpha, tau, sigma, input_variance = 1;
-	bool debug = false, no_cache = false, penalized_scan = false;
+	T alpha, tau, sigma, input_variance = 1, force_q = -1;
+	bool debug = false, no_cache = false, penalized_scan = false, dump_mc = false;
 	impl_t implementation;
 	std::vector<size_t> kernel_sizes;
 	size2_t size;
@@ -95,7 +95,9 @@ struct impl {
 	virtual boost::multi_array<T, 2> run(const boost::multi_array<T,2> &) = 0;
 
 protected:
-	T cached_q(std::function<std::vector<T>()> calc) {
+	T cached_q(std::function<void(std::vector<std::vector<T>>&)> calc) {
+		if(p.force_q > 0) return p.force_q;
+
 		static const auto cache_dir = "cache/";
 		using namespace std;
 		using namespace boost::filesystem;
@@ -103,13 +105,32 @@ protected:
 		ostringstream ss; ss << cache_dir << p.size[0] << 'x' << p.size[1];
 		for(auto s : p.kernel_sizes)
 			ss << '+' << s;
+		if(p.penalized_scan) ss << "-penalized";
 		auto target = ss.str();
 		create_directories(cache_dir);
 		vector<T> qs;
 		if(p.no_cache || !exists(target)) {
-			// simulate
-			qs = calc();
-			if(qs.size() == 0) return 4;
+			// simulate. k_qs[kernel][runs]
+			const size_t N = p.kernel_sizes.size(), M = p.monte_carlo_steps;
+			vector<vector<T>> k_qs;
+			for(size_t i = 0 ; i < N ; i++) k_qs.emplace_back();
+			calc(k_qs);
+			// print raw data
+			if(p.dump_mc) {
+				ofstream o("mc.dat");
+				for(size_t i = 0 ; i < N ; i++) {
+					if(i != 0) o << '\t';
+					o << p.kernel_sizes[i];
+				}
+				for(size_t j = 0 ; j < M ; j++)
+					for(size_t i = 0 ; i < N ; i++)
+						o << (i == 0 ? '\n' : '\t') << k_qs[i][j];
+			}
+			// max for each kernel. qs[runs]
+			qs = k_qs[0];
+			for(size_t i = 1 ; i < N ; i++)
+				for(size_t j = 0 ; j < M ; j++)
+					qs[j] = max(qs[j], k_qs[i][j]);
 			sort(qs.begin(), qs.end());
 			// write raw output.
 			ofstream f(target);

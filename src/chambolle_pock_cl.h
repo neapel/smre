@@ -104,29 +104,22 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 
 	void calc_q() {
 		// If needed, calculate `q/sigma` value.
-		float q = impl<T>::cached_q([&]{
-			std::vector<T> qs;
+		float q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
 			A data(size_1d), convolved(size_1d);
 			A2 f_data(size_1d);
 			vex::RandomNormal<T> random;
 			std::random_device dev;
 			std::mt19937 seed(dev());
 			for(size_t i = 0 ; i < p.monte_carlo_steps ; i++) {
-				// random image
 				data = random(vex::element_index(), seed());
 				f_data = fft(data);
-				// convolute with each kernel, find max value.
-				std::vector<T> k_qs;
-				for(const auto c : constraints) {
-					convolve(c.f_k, f_data, convolved);
+				for(size_t j = 0 ; j < constraints.size() ; j++) {
+					convolve(constraints[j].f_k, f_data, convolved);
 					auto norm_inf = max(fabs(convolved));
-					auto k_q = norm_inf - c.shift_q;
-					k_qs.push_back(k_q);
+					auto k_q = norm_inf - constraints[j].shift_q;
+					k_qs[j].push_back(k_q);
 				}
-				auto max_q = *max_element(k_qs.begin(), k_qs.end());
-				qs.push_back(max_q);
 			}
-			return qs;
 		});
 		for(auto &c : constraints)
 			c.q = q + c.shift_q;

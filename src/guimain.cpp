@@ -323,13 +323,17 @@ struct app_t : Gtk::Application {
 		OptionContext ctx("[FILE]");
 		OptionGroup group("params", "default parameters", "longer");
 
-		group.add_entry(entry("alpha", "initial value for alpha"), (double&)p->alpha);
-		group.add_entry(entry("tau", "initial value for tau"), (double&)p->tau);
-		group.add_entry(entry("sigma", "initial value for sigma"), (double&)p->sigma);
-		group.add_entry(entry("steps", "number of iteration steps"), (int&)p->max_steps);
+		double alpha = p->alpha, tau = p->tau, sigma = p->sigma;
+		int max_steps = p->max_steps, monte_carlo_steps = p->monte_carlo_steps;
+		group.add_entry(entry("alpha", "initial value for alpha"), alpha);
+		group.add_entry(entry("tau", "initial value for tau"), tau);
+		group.add_entry(entry("sigma", "initial value for sigma"), sigma);
+		group.add_entry(entry("steps", "number of iteration steps"), max_steps);
 		group.add_entry(entry("impl", "'gpu' for OpenCL or 'cpu' for OpenMP."), mem_fun(*this, &app_t::parse_impl));
-		group.add_entry(entry("mc-steps", "number of Monte Carlo steps"), (int&)p->monte_carlo_steps);
+		group.add_entry(entry("mc-steps", "number of Monte Carlo steps"), monte_carlo_steps);
 		group.add_entry(entry("no-cache", "don't use the monte carlo cache"), p->no_cache);
+		group.add_entry(entry("penalized-scan", "use penalized scan statistic"), p->penalized_scan);
+		group.add_entry(entry("mc-dump", "dump mc data for each kernel"), p->dump_mc);
 		group.add_entry(entry("debug", "enable debug output"), p->debug);
 		group.add_entry(entry("constraint", "kernel sizes, comma separated list or '<start>,<next>,...,<end>'"), mem_fun(*this, &app_t::parse_constraint));
 		group.add_entry(entry("resolvent", "'l2' or 'h1'"), mem_fun(*this, &app_t::parse_resolvent));
@@ -345,6 +349,11 @@ struct app_t : Gtk::Application {
 		int argc;
 		char **argv = cmd->get_arguments(argc);
 		ctx.parse(argc, argv);
+		p->alpha = alpha;
+		p->tau = tau;
+		p->sigma = sigma;
+		p->max_steps = max_steps;
+		p->monte_carlo_steps = monte_carlo_steps;
 
 		// remaining arguments: filenames. open them.
 		vector<RefPtr<File>> files;
