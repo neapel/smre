@@ -157,6 +157,13 @@ struct chambolle_pock : impl<T> {};
 
 template<class T>
 impl<T> *params<T>::runner() const {
+	// verify
+	if(kernel_sizes.size() < 1) throw std::invalid_argument("no kernels");
+	if(resolvent == nullptr) throw std::invalid_argument("no resolvent");
+	const auto min_sz = std::min(size[0], size[1]);
+	for(auto k : kernel_sizes)
+		if(k < 1 || k > min_sz) throw std::invalid_argument("invalid kernel size");
+	// ok.
 	switch(implementation) {
 		case CPU_IMPL: return new chambolle_pock<CPU_IMPL, T>(*this);
 		case GPU_IMPL: return new chambolle_pock<GPU_IMPL, T>(*this);
