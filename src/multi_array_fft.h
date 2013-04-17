@@ -19,12 +19,12 @@ template<> struct fftw_map<std::complex<float>> { typedef fftwf_complex type; };
 
 template<size_t dims>
 struct size_a {
-	std::array<int, dims> d, real;
+	std::array<int, dims> d, fft;
 	template<class I>
 	size_a(I size) {
 		for(size_t i = 0 ; i < dims ; i++) d[i] = size[i];
-		for(size_t i = 0 ; i < dims - 1 ; i++) real[i] = size[i];
-		real[dims - 1] = size[dims - 1] / 2 + 1;
+		for(size_t i = 0 ; i < dims - 1 ; i++) fft[i] = size[i];
+		fft[dims - 1] = size[dims - 1] / 2 + 1;
 	}
 	operator const int*() {
 		return d.data();
@@ -93,8 +93,8 @@ struct plan<float, std::complex<float>, dims> {
 	template<class I>
 	plan(I size, unsigned int flags = 0) {
 		size_a<dims> sz(size);
-		A0 in(sz.real);
-		A1 out(size);
+		A0 in(size);
+		A1 out(sz.fft);
 		#pragma omp critical
 		p = fftwf_plan_dft_r2c(dims, sz, data(in), data(out), flags);
 	}
@@ -133,8 +133,8 @@ struct plan<std::complex<float>, float, dims> {
 	template<class I>
 	plan(I size, unsigned int flags = 0) {
 		size_a<dims> sz(size);
-		A0 in(size);
-		A1 out(sz.real);
+		A0 in(sz.fft);
+		A1 out(size);
 		#pragma omp critical
 		p = fftwf_plan_dft_c2r(dims, sz, data(in), data(out), flags);
 	}
