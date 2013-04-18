@@ -43,28 +43,13 @@ RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 	auto pb = Pixbuf::create(COLORSPACE_RGB, false, 8, w, h);
 	auto px = pb->get_pixels();
 	auto stride = pb->get_rowstride();
-	auto high = max(a), low = min(a);
 	for(size_t y = 0 ; y != h ; y++)
 		for(size_t x = 0 ; x != w ; x++) {
 			auto p = px + (y * stride + 3 * x);
-#if 1
-			p[0] = p[1] = p[2] = high == low
-				? 0
-				: 255 * (a[y][x] - low) / (high - low);
-			if(!isfinite(a[y][x])) {
-				p[0] = 255; p[1] = p[2] = 0;
-			}
-#else
-			auto f_val = a[y][x];
-			if(mark_outliers && f_val == 0) { p[0] = p[2] = 0; p[1] = 200; }
-			else {
-				int value = 255 * (f_val + 1) / 2;
-				if(!mark_outliers) value = max(0, min(255, value));
-				if(value > 255) { p[0] = p[1] = 0; p[2] = 255; }
-				else if(value < 0) { p[0] = 255; p[1] = p[2] = 0; }
-				else { p[0] = p[1] = p[2] = value; }
-			}
-#endif
+			float v = (a[y][x] + 1) / 2 * 255;
+			if(v < 0) v = 0;
+			if(v > 255) v = 255;
+			p[0] = p[1] = p[2] = v;
 		}
 	return pb;
 }
