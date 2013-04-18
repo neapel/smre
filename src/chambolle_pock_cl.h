@@ -104,7 +104,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 
 	void calc_q() {
 		// If needed, calculate `q/sigma` value.
-		float q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
+		T q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
 			A data(size_1d), convolved(size_1d);
 			A2 f_data(size_1d);
 			vex::RandomNormal<T> random;
@@ -121,6 +121,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 				}
 			}
 		});
+		std::cerr << "q=" << q << std::endl;
 		for(auto &c : constraints)
 			c.q = q + c.shift_q;
 	}

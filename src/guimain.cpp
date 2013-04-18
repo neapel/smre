@@ -26,8 +26,8 @@ struct main_window : Gtk::ApplicationWindow {
 	params<T> *const p;
 	RefPtr<Pixbuf> input_image;
 
-	SpinButton alpha_value, tau_value, sigma_value, max_steps_value;
-	CheckButton impl_value, resolv_value, penalized_scan_value, debug_value;
+	SpinButton alpha_value, tau_value, sigma_value, max_steps_value, force_q_value;
+	CheckButton impl_value, resolv_value, penalized_scan_value, debug_value, do_force_q_value;
 	Statusbar statusbar;
 	Spinner progress;
 	Notebook notebook;
@@ -60,10 +60,12 @@ struct main_window : Gtk::ApplicationWindow {
 	  tau_value{Adjustment::create(p->tau, 0, 1000), 0, 2},
 	  sigma_value{Adjustment::create(p->sigma, 0, 5), 0, 2},
 	  max_steps_value{Adjustment::create(p->max_steps, 1, 100)},
+	  force_q_value{Adjustment::create(p->force_q, 0, 10), 0, 2},
 	  impl_value{"Use OpenCL"},
 	  resolv_value{"Use H1 resolvent"},
 	  penalized_scan_value{"Use penalized scan"},
 	  debug_value{"Debug log"},
+	  do_force_q_value{"q"},
 	  constraints_model{ListStore::create(constraints_columns)},
 	  constraints_view{constraints_model},
 	  steps_model{ListStore::create(steps_columns)},
@@ -106,8 +108,10 @@ struct main_window : Gtk::ApplicationWindow {
 		auto sigma_label = manage(new Label("σ", ALIGN_START));
 		options->attach_next_to(*sigma_label, *tau_label, POS_BOTTOM, 1, 1);
 		options->attach_next_to(sigma_value, *sigma_label, POS_RIGHT, 1, 1);
+		options->attach_next_to(do_force_q_value, *sigma_label, POS_BOTTOM, 1, 1);
+		options->attach_next_to(force_q_value, do_force_q_value, POS_RIGHT, 1, 1);
 		auto max_steps_label = manage(new Label("Steps", ALIGN_START));
-		options->attach_next_to(*max_steps_label, *sigma_label, POS_BOTTOM, 1, 1);
+		options->attach_next_to(*max_steps_label, do_force_q_value, POS_BOTTOM, 1, 1);
 		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
 		options->attach_next_to(impl_value, *max_steps_label, POS_BOTTOM, 2, 1);
 		options->attach_next_to(resolv_value, impl_value, POS_BOTTOM, 2, 1);
@@ -119,6 +123,10 @@ struct main_window : Gtk::ApplicationWindow {
 		tau_value.signal_value_changed().connect([=]{ p->tau = tau_value.get_value(); });
 		sigma_value.signal_value_changed().connect([=]{ p->sigma = sigma_value.get_value(); });
 		max_steps_value.signal_value_changed().connect([=]{ p->max_steps = max_steps_value.get_value(); });
+		auto q_ = [=]{ p->force_q = do_force_q_value.get_active() ? force_q_value.get_value() : -1; };
+		do_force_q_value.set_active(p->force_q >= 0);
+		do_force_q_value.signal_toggled().connect(q_);
+		force_q_value.signal_value_changed().connect(q_);
 
 		impl_value.set_active(p->implementation == GPU_IMPL);
 		impl_value.signal_toggled().connect([=]{ p->implementation = impl_value.get_active() ? GPU_IMPL : CPU_IMPL; });
@@ -248,7 +256,7 @@ struct main_window : Gtk::ApplicationWindow {
 				swap(current_log, run_p->debug_log);
 			}
 			output_image.set(multi_array_to_pixbuf(result));
-
+			delete run_p;
 			algorithm_done();
 		});
 	}
@@ -323,11 +331,12 @@ struct app_t : Gtk::Application {
 		OptionContext ctx("[FILE]");
 		OptionGroup group("params", "default parameters", "longer");
 
-		double alpha = p->alpha, tau = p->tau, sigma = p->sigma;
+		double alpha = p->alpha, tau = p->tau, sigma = p->sigma, force_q = p->force_q;
 		int max_steps = p->max_steps, monte_carlo_steps = p->monte_carlo_steps;
 		group.add_entry(entry("alpha", "initial value for alpha"), alpha);
 		group.add_entry(entry("tau", "initial value for tau"), tau);
 		group.add_entry(entry("sigma", "initial value for sigma"), sigma);
+		group.add_entry(entry("q", "don't calculate/cache q, use direct value"), force_q);
 		group.add_entry(entry("steps", "number of iteration steps"), max_steps);
 		group.add_entry(entry("impl", "'gpu' for OpenCL or 'cpu' for OpenMP."), mem_fun(*this, &app_t::parse_impl));
 		group.add_entry(entry("mc-steps", "number of Monte Carlo steps"), monte_carlo_steps);
@@ -352,6 +361,7 @@ struct app_t : Gtk::Application {
 		p->alpha = alpha;
 		p->tau = tau;
 		p->sigma = sigma;
+		p->force_q = force_q;
 		p->max_steps = max_steps;
 		p->monte_carlo_steps = monte_carlo_steps;
 

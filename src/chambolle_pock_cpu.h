@@ -91,7 +91,6 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			//#pragma omp critical
 			total_norm += maxnorm;
 		}
-
 		if(p.penalized_scan)
 			for(auto &c : constraints)
 				c.shift_q = sqrt(log(1.0 * p.size[0] * p.size[1] / pow(c.k_size, 2)));
@@ -128,6 +127,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 				}
 			}
 		});
+		std::cerr << "q=" << q << std::endl;
 		for(auto &c : constraints)
 			c.q = q + c.shift_q;
 	}
