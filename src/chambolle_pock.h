@@ -91,6 +91,7 @@ struct impl {
 	std::vector<debug_state<T>> debug_log;
 
 	impl(const params<T> &p) : p(p), debug_log() {}
+	virtual ~impl() {}
 
 	virtual boost::multi_array<T, 2> run(const boost::multi_array<T,2> &) = 0;
 
