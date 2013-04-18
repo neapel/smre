@@ -157,7 +157,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 
 		debug(x,0)
 		for(auto &c : constraints) {
-			c.y = Y;
+			c.y = Y; // ??
 			debug(c.y,0)
 		}
 
@@ -179,12 +179,9 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 				// convolve bar_x with kernel
 				A convolved(p.size);
 				convolve(c.f_k, fft_bar_x, convolved);
-				debug(convolved,n)
 				// calculate new y_i
 				convolved *= sigma;
-				debug(convolved,n)
 				c.y += convolved;
-				debug(c.y,n)
 				c.y = mimas::multi_func<T>(c.y,
 					[&](T v){return soft_shrink(v, c.q * sigma);});
 				debug(c.y,n)
@@ -198,9 +195,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			}
 			old_x = x;
 			w *= tau;
-			bar_x = x;
-			bar_x -= w;
-			bar_x -= Y;
+			bar_x = Y; bar_x -= x; bar_x -= w; //bar_x = x; bar_x -= w; bar_x -= Y;
 			debug(bar_x,n)
 			resolvent->evaluate(tau, bar_x, x);
 			x += Y;
@@ -214,10 +209,10 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			bar_x += x;
 			debug(bar_x,n)
 		}
-		auto out = Y - x;
-		debug(out,0)
+		Y -= x;
+		debug(Y,0)
 		if(p.debug) omp_set_num_threads(original_threads);
-		return out;
+		return Y;
 	}
 
 	#undef debug

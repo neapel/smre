@@ -149,7 +149,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 			impl<T>::debug_log.emplace_back(__data, #buffer); \
 		}
 
-	virtual void run(const A &Y, A &out) {
+	virtual void run(A &Y, A &out) {
 		A x(Y), bar_x(Y), old_x(size_1d), w(size_1d), convolved(size_1d);
 		A2 fft_bar_x(size_1d);
 
@@ -176,11 +176,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 				convolve(c.f_k, fft_bar_x, convolved);
 				debug(convolved,n)
 				// calculate new y_i
-				convolved *= sigma;
-				debug(convolved,n)
-				c.y += convolved;
-				debug(c.y,n)
-				c.y = soft_shrink(c.y, c.q * sigma);
+				c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma);
 				debug(c.y,n)
 				// convolve y_i with conjugate transpose of kernel
 				convolve(c.f_adj_k, c.y, convolved);
@@ -190,10 +186,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 				debug(w,n)
 			}
 			old_x = x;
-			w *= tau;
-			bar_x = x;
-			bar_x -= w;
-			bar_x -= Y;
+			bar_x = Y - x - w * tau; // x - Y - w*tau
 			debug(bar_x,n)
 			resolvent->evaluate(tau, bar_x, x);
 			x += Y;
@@ -201,10 +194,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 			const T theta = 1 / sqrt(1 + 2 * tau * resolvent->gamma);
 			tau *= theta;
 			sigma /= theta;
-			bar_x = x;
-			bar_x -= old_x;
-			bar_x *= theta;
-			bar_x += x;
+			bar_x = x + (x - old_x) * theta;
 			debug(bar_x,n)
 		}
 		out = Y - x;
