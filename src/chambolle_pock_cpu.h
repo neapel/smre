@@ -10,7 +10,7 @@
 #include <omp.h>
 #endif
 
-
+#undef USE_SAT
 
 
 template<class T>
@@ -18,22 +18,31 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 	typedef std::complex<T> T2;
 
 	typedef boost::multi_array<T, 2> A;
+#ifndef USE_SAT
 	typedef boost::multi_array<T2, 2> A2;
+#endif
 
 	using impl<T>::p;
 
 	struct constraint {
 		// size of the box kernel.
 		size_t k_size;
+#ifndef USE_SAT
 		// FFT of the kernel and of the adjungated kernel.
 		A2 f_k, f_adj_k;
+#endif
 		// y for this constraint
 		A y;
 		// specific q for this constraint.
 		T q, shift_q;
 
+#ifdef USE_SAT
+		constraint(size_t k_size, size2_t size)
+		: k_size(k_size), y(size), q(-1), shift_q(0) {}
+#else
 		constraint(size_t k_size, size2_t size, size2_t fft_size)
 		: k_size(k_size), f_k(fft_size), f_adj_k(fft_size), y(size), q(-1), shift_q(0) {}
+#endif
 	};
 
 	inline T soft_shrink(T x, T q) {
@@ -42,22 +51,30 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		return 0;
 	}
 
+#ifdef USE_SAT
+	A sat;
+#else
 	fftw::plan<T, T2, 2> fft;
 	fftw::plan<T2, T, 2> ifft;
-	const size2_t fft_size;
 	const T scale;
-	T total_norm;
+	size2_t fft_size;
 	A2 temp;
+#endif
+	T total_norm;
 	std::vector<constraint> constraints;
 	resolvent_impl<CPU_IMPL, T> *resolvent;
 
 
 	chambolle_pock(const params<T> &p)
 	: impl<T>(p),
+#ifdef USE_SAT
+	  sat(p.size),
+#else
 	  fft(p.size), ifft(p.size),
-	  fft_size{{p.size[0], p.size[1]/2+1}},
 	  scale(1.0 / (p.size[0] * p.size[1])),
+	  fft_size{{p.size[0], p.size[1] / 2 + 1}},
 	  temp(fft_size),
+#endif
 	  resolvent(p.resolvent->cpu_runner(p.size)) {
 		update_kernels();
 	}
@@ -70,6 +87,12 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		//#pragma omp parallel for
 		for(size_t i = 0 ; i < p.kernel_sizes.size() ; i++) {
 			auto k_size = p.kernel_sizes[i];
+#ifdef USE_SAT
+			constraints.emplace_back(k_size, p.size);
+			const auto v = 1 / (M_SQRT2 * k_size);
+			T maxnorm = k_size * k_size * v;
+			total_norm += maxnorm;
+#else
 			const auto v = 1 / (M_SQRT2 * k_size);
 			A k(p.size), adj_k(p.size);
 			fill(k, 0);
@@ -90,6 +113,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			T maxnorm = max(norm<T>(c.f_k));
 			//#pragma omp critical
 			total_norm += maxnorm;
+#endif
 		}
 		if(p.penalized_scan)
 			for(auto &c : constraints)
