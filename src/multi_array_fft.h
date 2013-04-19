@@ -70,8 +70,8 @@ struct plan<float, float, dims> {
 	template<class I>
 	plan(I size, dir_t dir = forward, unsigned int flags = 0) {
 		size_a<dims> sz(size);
-		A0 in(size);
-		A1 out(size);
+		A0 in(sz.d);
+		A1 out(sz.d);
 		fftw_r2r_kind kind[dims];
 		for(size_t i = 0 ; i < dims ; i++)
 			kind[i] = dir == forward ? FFTW_REDFT10 : FFTW_REDFT01;
@@ -93,7 +93,7 @@ struct plan<float, std::complex<float>, dims> {
 	template<class I>
 	plan(I size, unsigned int flags = 0) {
 		size_a<dims> sz(size);
-		A0 in(size);
+		A0 in(sz.d);
 		A1 out(sz.fft);
 		#pragma omp critical
 		p = fftwf_plan_dft_r2c(dims, sz, data(in), data(out), flags);
@@ -113,8 +113,8 @@ struct plan<std::complex<float>, std::complex<float>, dims> {
 	template<class I>
 	plan(I size, dir_t dir = forward, unsigned int flags = 0) {
 		size_a<dims> sz(size);
-		A0 in(size);
-		A1 out(size);
+		A0 in(sz.d);
+		A1 out(sz.d);
 		p = fftwf_plan_dft(dims, sz, data(in), data(out),
 			dir == forward ? FFTW_FORWARD : FFTW_BACKWARD, flags);
 	}
@@ -134,7 +134,7 @@ struct plan<std::complex<float>, float, dims> {
 	plan(I size, unsigned int flags = 0) {
 		size_a<dims> sz(size);
 		A0 in(sz.fft);
-		A1 out(size);
+		A1 out(sz.d);
 		#pragma omp critical
 		p = fftwf_plan_dft_c2r(dims, sz, data(in), data(out), flags);
 	}
