@@ -2,29 +2,11 @@
 #define __MULTI_ARRAY_IO_H__
 
 #include <gtkmm.h>
-#include <iostream>
-#include <memory>
-#include <boost/regex.hpp>
-#include <stdexcept>
-#include <boost/format.hpp>
-#include <boost/lexical_cast.hpp>
-#include <cmath>
-#include "config.h"
-#include "multi_array_io.h"
-
-#include "chambolle_pock.h"
-#include "constraint_parser.h"
-
-using namespace std;
-using namespace Gtk;
-using namespace Gdk;
-using namespace Glib;
-using namespace sigc;
-
+#include <boost/multi_array.hpp>
 
 // Copy pixbuf data [0:255] into a new multi_array [-1:1]
-boost::multi_array<float, 2> pixbuf_to_multi_array(const RefPtr<Pixbuf> &pb) {
-	assert(pb->get_colorspace() == COLORSPACE_RGB);
+boost::multi_array<float, 2> pixbuf_to_multi_array(const Glib::RefPtr<Gdk::Pixbuf> &pb) {
+	assert(pb->get_colorspace() == Gdk::COLORSPACE_RGB);
 	assert(pb->get_bits_per_sample() == 8);
 	auto w = pb->get_width(), h = pb->get_height();
 	auto px = pb->get_pixels();
@@ -38,9 +20,9 @@ boost::multi_array<float, 2> pixbuf_to_multi_array(const RefPtr<Pixbuf> &pb) {
 
 // Copy multi_array data [-1:1] into a new pixbuf [0:255]
 // mark_outliers: <-1 = red, >1 = blue, exactly 0 = green
-RefPtr<Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
+Glib::RefPtr<Gdk::Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
 	auto h = a.shape()[0], w = a.shape()[1];
-	auto pb = Pixbuf::create(COLORSPACE_RGB, false, 8, w, h);
+	auto pb = Gdk::Pixbuf::create(Gdk::COLORSPACE_RGB, false, 8, w, h);
 	auto px = pb->get_pixels();
 	auto stride = pb->get_rowstride();
 	for(size_t y = 0 ; y != h ; y++)
