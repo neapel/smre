@@ -1,23 +1,15 @@
 #include "chambolle_pock.h"
 #include "constraint_parser.h"
-#include <chrono>
+#include "watch.h"
 #include <boost/program_options.hpp>
 
+
 using namespace std;
-using namespace std::chrono;
 using namespace boost;
 using namespace boost::program_options;
 
 static bool run_cpu = true, run_gpu = true;
 static size_t runs = 10;
-
-struct watch {
-	time_point<high_resolution_clock> start;
-	watch() : start(high_resolution_clock::now()) {}
-	double operator()() {
-		return duration<double>(high_resolution_clock::now() - start).count();
-	}
-};
 
 
 template<impl_t impl, class T>
