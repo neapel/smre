@@ -3,46 +3,34 @@
 
 
 #include "chambolle_pock.h"
-#include "multi_array_fft.h"
 #include "resolvent.h"
+#include "convolution.h"
+
 
 #if HAVE_OPENMP
 #include <omp.h>
 #endif
 
-#undef USE_SAT
 
 
 template<class T>
 struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
-	typedef std::complex<T> T2;
-
 	typedef boost::multi_array<T, 2> A;
-#ifndef USE_SAT
-	typedef boost::multi_array<T2, 2> A2;
-#endif
 
 	using impl<T>::p;
 
 	struct constraint {
 		// size of the box kernel.
 		size_t k_size;
-#ifndef USE_SAT
-		// FFT of the kernel and of the adjungated kernel.
-		A2 f_k, f_adj_k;
-#endif
+		std::shared_ptr<prepared_kernel> k, adj_k;
 		// y for this constraint
 		A y;
 		// specific q for this constraint.
 		T q, shift_q;
 
-#ifdef USE_SAT
-		constraint(size_t k_size, size2_t size)
-		: k_size(k_size), y(size), q(-1), shift_q(0) {}
-#else
-		constraint(size_t k_size, size2_t size, size2_t fft_size)
-		: k_size(k_size), f_k(fft_size), f_adj_k(fft_size), y(size), q(-1), shift_q(0) {}
-#endif
+		constraint(size_t k_size, size2_t size,
+			std::shared_ptr<prepared_kernel> k, std::shared_ptr<prepared_kernel> adj_k)
+		: k_size(k_size), k(k), adj_k(adj_k), y(size), q(-1), shift_q(0) {}
 	};
 
 	inline T soft_shrink(T x, T q) {
@@ -51,69 +39,28 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		return 0;
 	}
 
-#ifdef USE_SAT
-	A sat;
-#else
-	fftw::plan<T, T2, 2> fft;
-	fftw::plan<T2, T, 2> ifft;
-	const T scale;
-	size2_t fft_size;
-	A2 temp;
-#endif
 	T total_norm;
 	std::vector<constraint> constraints;
-	resolvent_impl<CPU_IMPL, T> *resolvent;
+	std::unique_ptr<resolvent_impl<CPU_IMPL, T>> resolvent;
+	std::unique_ptr<convolver<A>> convolution;
 
 
 	chambolle_pock(const params<T> &p)
 	: impl<T>(p),
-#ifdef USE_SAT
-	  sat(p.size),
-#else
-	  fft(p.size), ifft(p.size),
-	  scale(1.0 / (p.size[0] * p.size[1])),
-	  fft_size{{p.size[0], p.size[1] / 2 + 1}},
-	  temp(fft_size),
-#endif
 	  resolvent(p.resolvent->cpu_runner(p.size)) {
+		if(p.use_fft) convolution.reset(new cpu_fft_convolver<T>(p.size));
+		else convolution.reset(new cpu_sat_convolver<T>(p.size));
 		update_kernels();
 	}
 
 	void update_kernels() {
-		using namespace boost;
-		using namespace mimas;
 		constraints.clear();
 		total_norm = 0;
-		//#pragma omp parallel for
-		for(size_t i = 0 ; i < p.kernel_sizes.size() ; i++) {
-			auto k_size = p.kernel_sizes[i];
-#ifdef USE_SAT
-			constraints.emplace_back(k_size, p.size);
-			const auto v = 1 / (M_SQRT2 * k_size);
-			T maxnorm = k_size * k_size * v;
-			total_norm += maxnorm;
-#else
-			const auto v = 1 / (M_SQRT2 * k_size);
-			A k(p.size), adj_k(p.size);
-			fill(k, 0);
-			fill(adj_k, 0);
-			// k[-0,-1,...,-(k_size-1)] = v; rest 0.
-			// adj_k[i] = k[-i] => adj_k[0,1,...,(k_size-1)] = v;
-			for(size_t i0 = 0 ; i0 < k_size ; i0++)
-				for(size_t i1 = 0 ; i1 < k_size ; i1++) {
-					k[(p.size[0] - i0) % p.size[0]][(p.size[1] - i1) % p.size[1]] = v;
-					adj_k[i0][i1] = v;
-				}
-			// store FFT of that
-			constraints.emplace_back(k_size, p.size, fft_size);
-			auto &c = constraints.back();
-			fft(k, c.f_k);
-			fft(adj_k, c.f_adj_k);
-			// Calculate max norm of transformed kernel
-			T maxnorm = max(norm<T>(c.f_k));
-			//#pragma omp critical
-			total_norm += maxnorm;
-#endif
+		for(auto k_size : p.kernel_sizes) {
+			auto prep_k = convolution->prepare_kernel(k_size, false);
+			auto adj_prep_k = convolution->prepare_kernel(k_size, true);
+			constraints.emplace_back(k_size, p.size, prep_k, adj_prep_k);
+			total_norm += k_size / M_SQRT2;
 		}
 		if(p.penalized_scan)
 			for(auto &c : constraints)
@@ -121,37 +68,24 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		calc_q();
 	}
 
-	void convolve(const A2 &kernel, const A &in, A &out) {
-		fft(in, temp);
-		convolve(kernel, temp, out);
-	}
-
-	void convolve(const A2 &kernel, const A2 &in, A &out) {
-		temp = mimas::multi_func<T2>(kernel, in,
-			[&](T2 a, T2 b){return a * b * scale;});
-		ifft(temp, out);
-	}
-
 	void calc_q() {
 		using namespace std;
 		const T q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
 			A data(p.size), convolved(p.size);
-			A2 f_data(fft_size);
 			random_device dev;
 			mt19937 gen(dev());
 			normal_distribution<T> dist(/*mean*/0, /*stddev*/1);
 			for(size_t i = 0 ; i < p.monte_carlo_steps ; i++) {
 				for(auto row : data) for(auto &x : row) x = dist(gen);
-				fft(data, f_data);
+				auto f_data = convolution->prepare_image(data);
 				for(size_t j = 0 ; j < constraints.size() ; j++) {
-					convolve(constraints[j].f_k, f_data, convolved);
+					convolution->conv(f_data, constraints[j].k, convolved);
 					auto norm_inf = max(abs(convolved));
 					auto k_q = norm_inf - constraints[j].shift_q;
 					k_qs[j].push_back(k_q);
 				}
 			}
 		});
-		std::cerr << "q=" << q << std::endl;
 		for(auto &c : constraints)
 			c.q = q + c.shift_q;
 	}
@@ -173,15 +107,16 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 				Y[i0 + 20][i1 + p.size[1] - 40] = 0;		
 #endif
 
+#if HAVE_OPENMP
 		const int original_threads = omp_get_num_threads();
 		if(p.debug) omp_set_num_threads(1);
+#endif
 
 		A x(Y), bar_x(Y), old_x(p.size), w(p.size);
-		A2 fft_bar_x(fft_size);
 
 		debug(x,0)
 		for(auto &c : constraints) {
-			c.y = Y; // ??
+			fill(c.y, 0);
 			debug(c.y,0)
 		}
 
@@ -196,13 +131,13 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			// reset accumulator
 			fill(w, 0);
 			// transform bar_x for convolutions
-			fft(bar_x, fft_bar_x);
+			auto f_bar_x = convolution->prepare_image(bar_x);
 			#pragma omp parallel for
 			for(size_t i = 0 ; i < constraints.size() ; i++) {
 				auto &c = constraints[i];
 				// convolve bar_x with kernel
 				A convolved(p.size);
-				convolve(c.f_k, fft_bar_x, convolved);
+				convolution->conv(f_bar_x, c.k, convolved);
 				// calculate new y_i
 				convolved *= sigma;
 				c.y += convolved;
@@ -210,16 +145,18 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 					[&](T v){return soft_shrink(v, c.q * sigma);});
 				debug(c.y,n)
 				// convolve y_i with conjugate transpose of kernel
-				convolve(c.f_adj_k, c.y, convolved);
+				auto f_y = convolution->prepare_image(c.y);
+				convolution->conv(f_y, c.adj_k, convolved);
 				debug(convolved,n)
 				// accumulate
 				#pragma omp critical
 				w += convolved;
 				debug(w,n)
 			}
+
 			old_x = x;
 			w *= tau;
-			bar_x = Y; bar_x -= x; bar_x -= w; //bar_x = x; bar_x -= w; bar_x -= Y;
+			bar_x = x; bar_x -= Y; bar_x -= tau;
 			debug(bar_x,n)
 			resolvent->evaluate(tau, bar_x, x);
 			x += Y;
@@ -235,7 +172,9 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 		}
 		Y -= x;
 		debug(Y,0)
+#if HAVE_OPENMP
 		if(p.debug) omp_set_num_threads(original_threads);
+#endif
 		return Y;
 	}
 

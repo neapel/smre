@@ -27,7 +27,7 @@ struct main_window : Gtk::ApplicationWindow {
 	RefPtr<Pixbuf> input_image;
 
 	SpinButton alpha_value, tau_value, sigma_value, max_steps_value, force_q_value;
-	CheckButton impl_value, resolv_value, penalized_scan_value, debug_value, do_force_q_value;
+	CheckButton impl_value, use_fft_value, resolv_value, penalized_scan_value, debug_value, do_force_q_value;
 	Statusbar statusbar;
 	Spinner progress;
 	Notebook notebook;
@@ -62,6 +62,7 @@ struct main_window : Gtk::ApplicationWindow {
 	  max_steps_value{Adjustment::create(p->max_steps, 1, 100)},
 	  force_q_value{Adjustment::create(p->force_q, 0, 10), 0, 2},
 	  impl_value{"Use OpenCL"},
+	  use_fft_value{"Use FFT"},
 	  resolv_value{"Use H1 resolvent"},
 	  penalized_scan_value{"Use penalized scan"},
 	  debug_value{"Debug log"},
@@ -114,7 +115,8 @@ struct main_window : Gtk::ApplicationWindow {
 		options->attach_next_to(*max_steps_label, do_force_q_value, POS_BOTTOM, 1, 1);
 		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
 		options->attach_next_to(impl_value, *max_steps_label, POS_BOTTOM, 2, 1);
-		options->attach_next_to(resolv_value, impl_value, POS_BOTTOM, 2, 1);
+		options->attach_next_to(use_fft_value, impl_value, POS_BOTTOM, 2, 1);
+		options->attach_next_to(resolv_value, use_fft_value, POS_BOTTOM, 2, 1);
 		options->attach_next_to(penalized_scan_value, resolv_value, POS_BOTTOM, 2, 1);
 		options->attach_next_to(debug_value, penalized_scan_value, POS_BOTTOM, 2, 1);
 
@@ -130,6 +132,9 @@ struct main_window : Gtk::ApplicationWindow {
 
 		impl_value.set_active(p->implementation == GPU_IMPL);
 		impl_value.signal_toggled().connect([=]{ p->implementation = impl_value.get_active() ? GPU_IMPL : CPU_IMPL; });
+
+		use_fft_value.set_active(p->use_fft);
+		use_fft_value.signal_toggled().connect([=]{ p->use_fft = use_fft_value.get_active(); });
 
 		resolv_value.signal_toggled().connect([=]{
 			if(resolv_value.get_active()) p->resolvent = new resolvent_h1_params<T>();
@@ -294,14 +299,13 @@ struct app_t : Gtk::Application {
 	main_window *main;
 
 	params<T> *p;
-	vex::Context clctx;
+	vex::Context *clctx;
 
 
 	app_t()
 	: Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE),
 	  input_image(), main(NULL),
-	  p(new params<T>()),
-	  clctx(vex::Filter::Count(1)) {}
+	  p(new params<T>()) {}
 
 	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
 		if(!has_value) return false;
@@ -333,6 +337,7 @@ struct app_t : Gtk::Application {
 
 		double alpha = p->alpha, tau = p->tau, sigma = p->sigma, force_q = p->force_q;
 		int max_steps = p->max_steps, monte_carlo_steps = p->monte_carlo_steps;
+		bool use_fft = p->use_fft;
 		group.add_entry(entry("alpha", "initial value for alpha"), alpha);
 		group.add_entry(entry("tau", "initial value for tau"), tau);
 		group.add_entry(entry("sigma", "initial value for sigma"), sigma);
@@ -346,6 +351,7 @@ struct app_t : Gtk::Application {
 		group.add_entry(entry("debug", "enable debug output"), p->debug);
 		group.add_entry(entry("constraint", "kernel sizes, comma separated list or '<start>,<next>,...,<end>'"), mem_fun(*this, &app_t::parse_constraint));
 		group.add_entry(entry("resolvent", "'l2' or 'h1'"), mem_fun(*this, &app_t::parse_resolvent));
+		group.add_entry(entry("use-fft", "use FFT for convolution (or SAT)"), use_fft);
 
 		string output_file;
 		group.add_entry_filename(entry("output", "save output PNG here (runs without GUI)."), output_file);
@@ -364,6 +370,7 @@ struct app_t : Gtk::Application {
 		p->force_q = force_q;
 		p->max_steps = max_steps;
 		p->monte_carlo_steps = monte_carlo_steps;
+		p->use_fft = use_fft;
 
 		// remaining arguments: filenames. open them.
 		vector<RefPtr<File>> files;
@@ -372,8 +379,9 @@ struct app_t : Gtk::Application {
 		if(!files.empty()) open(files);
 
 		// init OpenCL
-		vex::StaticContext<>::set(clctx);
-		cerr << "CL context:" << clctx << endl;
+		clctx = new vex::Context(vex::Filter::Count(1));
+		vex::StaticContext<>::set(*clctx);
+		cerr << "CL context:" << *clctx << endl;
 
 		// run.
 		if(output_file.empty())
@@ -407,5 +415,9 @@ struct app_t : Gtk::Application {
 };
 
 int main(int argc, char **argv) {
-	return app_t().run(argc, argv);
+	try {
+		return app_t().run(argc, argv);
+	} catch(cl::Error &e) {
+		cerr << e << endl;
+	}
 }

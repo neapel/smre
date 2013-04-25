@@ -63,7 +63,7 @@ template<class T>
 struct params {
 	size_t max_steps = 10, monte_carlo_steps = 1000;
 	T alpha, tau, sigma, input_variance = 1, force_q = -1;
-	bool debug = false, no_cache = false, penalized_scan = false, dump_mc = false;
+	bool debug = false, no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true;
 	impl_t implementation;
 	std::vector<size_t> kernel_sizes;
 	size2_t size;
