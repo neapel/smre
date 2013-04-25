@@ -16,6 +16,7 @@ template<class T>
 struct resolvent_impl<CPU_IMPL, T> {
 	const T gamma;
 	resolvent_impl(T gamma) : gamma(gamma) {}
+	virtual ~resolvent_impl() {}
 
 	virtual void evaluate(T tau, const boost::multi_array<T, 2> &in, boost::multi_array<T, 2> &out) = 0;
 };
@@ -24,6 +25,7 @@ template<class T>
 struct resolvent_impl<GPU_IMPL, T> {
 	const T gamma;
 	resolvent_impl(T gamma) : gamma(gamma) {}
+	virtual ~resolvent_impl() {}
 
 	virtual void evaluate(T tau, const vex::vector<T> &in, vex::vector<T> &out) = 0;
 };

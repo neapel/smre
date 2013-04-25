@@ -23,8 +23,6 @@ enum impl_t {
 	CPU_IMPL, GPU_IMPL
 };
 
-typedef std::array<size_t, 2> size2_t;
-
 
 #include "resolvent.h"
 

@@ -21,5 +21,7 @@ namespace boost {
 	}
 };
 
+typedef std::array<size_t, 2> size2_t;
+
 
 #endif

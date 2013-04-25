@@ -20,3 +20,6 @@ endif()
 
 add_executable(benchmark benchmark.cpp ${BASE_SRC})
 target_link_libraries(benchmark ${CMAKE_REQUIRED_LIBRARIES})
+
+add_executable(convolution_benchmark convolution_benchmark.cpp ${BASE_SRC})
+target_link_libraries(convolution_benchmark ${CMAKE_REQUIRED_LIBRARIES})

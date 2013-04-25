@@ -1,7 +1,8 @@
 #include "chambolle_pock.h"
+#include <boost/program_options.hpp>
 #include "constraint_parser.h"
 #include "watch.h"
-#include <boost/program_options.hpp>
+
 
 
 using namespace std;
@@ -14,29 +15,21 @@ static size_t runs = 10;
 
 template<impl_t impl, class T>
 void run(params<T> a, multi_array<T, 2> in) {
-	vector<double> times;
+	watch w;
 	try {
-		watch w_first;
 		chambolle_pock<impl, T> c(a);
 		c.run(in);
-		times.push_back(w_first());
-		if(runs > 0) {
-			watch w_runs;
-			for(size_t i = 0 ; i < runs ; i++) {
-				watch w_run;
-				c.run(in);
-				times.push_back(w_run());
-			}
-			times.push_back(w_runs() / runs);
+		for(size_t i = 0 ; i < runs ; i++) {
+			w.start();
+			c.run(in);
+			w.stop();
 		}
 	} catch(...) {}
-	for(size_t i = 0 ; i < runs + 2 ; i++) {
-		if(i < times.size())
-			cout << '\t' << times[i];
-		else
-			cout << "\tnan";
-	}
+	cout << '\t';
+	if(w.times.size() > 0) cout << w.median();
+	else cout << "nan";
 }
+
 
 template<class T>
 void bench(size_t image, size_t kernels) {
@@ -50,26 +43,14 @@ void bench(size_t image, size_t kernels) {
 	fill(in, 1);
 	cout << image << '\t' << kernels;
 	if(run_cpu) run<CPU_IMPL>(p, in);
-	if(run_gpu) run<GPU_IMPL>(p, in);
+	if(run_gpu) {
+		run<GPU_IMPL>(p, in);
+		p.use_fft = false;
+		run<GPU_IMPL>(p, in);
+	}
 	cout << endl;
 }
 
-struct sizes_t : vector<size_t> {
-	sizes_t() : vector<size_t>() {}
-	sizes_t(initializer_list<size_t> l) : vector<size_t>(l) {}
-	sizes_t(vector<size_t> l) : vector<size_t>(l) {}
-};
-
-void validate(any &v, const vector<string> &values, sizes_t *, int) {
-	//?? validators::check_first_occurence(v);
-	auto str = validators::get_single_string(values);
-	try {
-		auto lst = list_expression(str);
-		v = any(sizes_t(lst));
-	} catch(...) {
-		throw validation_error(validation_error::invalid_option_value);
-	}
-}
 
 int main(int argc, char **argv) {
 	options_description desc("Options");
@@ -94,16 +75,8 @@ int main(int argc, char **argv) {
 	cerr << "CL context:" << clctx << endl;
 
 	cout << "size\tkernels";
-	if(run_cpu) {
-		cout << "\tcpufirst";
-		for(size_t i = 0 ; i < runs ; i++) cout << "\tcpu" << i;
-		cout << "\tcpuavg";
-	}
-	if(run_gpu) {
-		cout << "\tgpufirst";
-		for(size_t i = 0 ; i < runs ; i++) cout << "\tgpu" << i;
-		cout << "\tgpuavg";
-	}
+	if(run_cpu) cout << "\tcpu";
+	if(run_gpu) cout << "\tgpu\tgpusat";
 	cout << endl;
 
 	for(auto w : sizes)

@@ -23,7 +23,7 @@ struct size_a {
 	template<class I>
 	size_a(I size) {
 		for(size_t i = 0 ; i < dims ; i++) d[i] = size[i];
-		for(size_t i = 0 ; i < dims - 1 ; i++) fft[i] = size[i];
+		for(size_t i = 0 ; i <= dims - 1 ; i++) fft[i] = size[i];
 		fft[dims - 1] = size[dims - 1] / 2 + 1;
 	}
 	operator const int*() {
