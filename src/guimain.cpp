@@ -239,6 +239,11 @@ struct main_window : Gtk::ApplicationWindow {
 
 	// Run the algorithm in a new thread.
 	void do_run() {
+		if(constraints_model->children().size() == 0) {
+			cerr << "no constraints" << endl;
+			return;
+		}
+
 		progress.start();
 		progress.show();
 
