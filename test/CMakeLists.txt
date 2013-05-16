@@ -54,3 +54,6 @@ set(MAT_DIR "${CMAKE_SOURCE_DIR}/matfiles")
 #tiny_test(test_resolvent)
 tiny_test(test_constraint_parser)
 tiny_test(convolution)
+
+tiny_test(convolution_error)
+target_link_libraries(convolution_error "-lmpfr")
