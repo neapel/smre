@@ -23,7 +23,7 @@ typedef float T;
 
 
 struct main_window : Gtk::ApplicationWindow {
-	params<T> *const p;
+	shared_ptr<params<T>> p;
 	RefPtr<Pixbuf> input_image;
 
 	SpinButton alpha_value, tau_value, sigma_value, max_steps_value, force_q_value;
@@ -54,7 +54,7 @@ struct main_window : Gtk::ApplicationWindow {
 	vector<debug_state<T>> current_log, previous_log;
 	Dispatcher algorithm_done;
 
-	main_window(params<T> *p)
+	main_window(shared_ptr<params<T>> p)
 	: p(p),
 	  alpha_value{Adjustment::create(p->alpha, 0, 1), 0, 2},
 	  tau_value{Adjustment::create(p->tau, 0, 1000), 0, 2},
@@ -137,8 +137,8 @@ struct main_window : Gtk::ApplicationWindow {
 		use_fft_value.signal_toggled().connect([=]{ p->use_fft = use_fft_value.get_active(); });
 
 		resolv_value.signal_toggled().connect([=]{
-			if(resolv_value.get_active()) p->resolvent = new resolvent_h1_params<T>();
-			else p->resolvent = new resolvent_l2_params<T>();
+			if(resolv_value.get_active()) p->resolvent = make_shared<resolvent_h1_params<T>>();
+			else p->resolvent = make_shared<resolvent_l2_params<T>>();
 		});
 
 		penalized_scan_value.set_active(p->penalized_scan);
@@ -266,7 +266,6 @@ struct main_window : Gtk::ApplicationWindow {
 				swap(current_log, run_p->debug_log);
 			}
 			output_image.set(multi_array_to_pixbuf(result));
-			delete run_p;
 			algorithm_done();
 		});
 	}
@@ -301,16 +300,14 @@ OptionEntry entry(string name, string desc) {
 
 struct app_t : Gtk::Application {
 	RefPtr<Pixbuf> input_image;
-	main_window *main;
+	shared_ptr<main_window> main;
 
-	params<T> *p;
-	vex::Context *clctx;
-
+	shared_ptr<params<T>> p = make_shared<params<T>>();
+	shared_ptr<vex::Context> clctx;
 
 	app_t()
 	: Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE),
-	  input_image(), main(NULL),
-	  p(new params<T>()) {}
+	  input_image() {}
 
 	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
 		if(!has_value) return false;
@@ -329,8 +326,8 @@ struct app_t : Gtk::Application {
 
 	bool parse_resolvent(const ustring &, const ustring &value, bool has_value) {
 		if(!has_value) return false;
-		if(value == "l2") p->resolvent = new resolvent_l2_params<T>();
-		else if(value == "h1") p->resolvent = new resolvent_h1_params<T>();
+		if(value == "l2") p->resolvent = make_shared<resolvent_l2_params<T>>();
+		else if(value == "h1") p->resolvent = make_shared<resolvent_h1_params<T>>();
 		else return false;
 		return true;
 	}
@@ -384,7 +381,7 @@ struct app_t : Gtk::Application {
 		if(!files.empty()) open(files);
 
 		// init OpenCL
-		clctx = new vex::Context(vex::Filter::Count(1));
+		clctx = make_shared<vex::Context>(vex::Filter::Count(1));
 		vex::StaticContext<>::set(*clctx);
 		cerr << "CL context:" << *clctx << endl;
 
@@ -412,7 +409,7 @@ struct app_t : Gtk::Application {
 	}
 
 	void on_activate() {
-		main = new main_window(p);
+		main = make_shared<main_window>(p);
 		add_window(*main);
 		if(input_image) main->open(input_image);
 		main->show();

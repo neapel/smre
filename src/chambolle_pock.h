@@ -62,18 +62,18 @@ struct impl;
 template<class T>
 struct params {
 	size_t max_steps = 10, monte_carlo_steps = 1000;
-	T alpha, tau, sigma, input_variance = 1, force_q = -1;
+	T alpha = 0.5, tau = 50, sigma = 1, input_variance = 1, force_q = -1;
 	bool debug = false, no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true;
-	impl_t implementation;
+	impl_t implementation = CPU_IMPL;
 	std::vector<size_t> kernel_sizes;
 	size2_t size;
-	resolvent_params<T> *resolvent;
+	std::shared_ptr<resolvent_params<T>> resolvent = std::make_shared<resolvent_l2_params<T>>();
 
 
-	params(size2_t size = {{0,0}}, std::vector<size_t> kernel_sizes = std::vector<size_t>(), T alpha = 0.5, T tau = 50, T sigma = 1)
-	: alpha(alpha), tau(tau), sigma(sigma), implementation(CPU_IMPL), kernel_sizes(kernel_sizes), size(size), resolvent(new resolvent_l2_params<T>()) {}
+	params(size2_t size = {{0,0}}, std::vector<size_t> kernel_sizes = std::vector<size_t>())
+	: kernel_sizes(kernel_sizes), size(size) {}
 
-	impl<T> *runner() const;
+	std::shared_ptr<impl<T>> runner() const;
 
 	template<class A>
 	void set_size(A a) {
@@ -85,7 +85,7 @@ struct params {
 
 template<class T>
 struct impl {
-	params<T> p;
+	const params<T> &p;
 	std::vector<debug_state<T>> debug_log;
 
 	impl(const params<T> &p) : p(p), debug_log() {}
@@ -155,7 +155,7 @@ struct chambolle_pock : impl<T> {};
 #include "chambolle_pock_cl.h"
 
 template<class T>
-impl<T> *params<T>::runner() const {
+std::shared_ptr<impl<T>> params<T>::runner() const {
 	// verify
 	if(kernel_sizes.size() < 1) throw std::invalid_argument("no kernels");
 	if(resolvent == nullptr) throw std::invalid_argument("no resolvent");
@@ -164,8 +164,8 @@ impl<T> *params<T>::runner() const {
 		if(k < 1 || k > min_sz) throw std::invalid_argument("invalid kernel size");
 	// ok.
 	switch(implementation) {
-		case CPU_IMPL: return new chambolle_pock<CPU_IMPL, T>(*this);
-		case GPU_IMPL: return new chambolle_pock<GPU_IMPL, T>(*this);
+		case CPU_IMPL: return std::make_shared<chambolle_pock<CPU_IMPL, T>>(*this);
+		case GPU_IMPL: return std::make_shared<chambolle_pock<GPU_IMPL, T>>(*this);
 		default: throw std::runtime_error("Unsupported implementation");
 	}
 }
