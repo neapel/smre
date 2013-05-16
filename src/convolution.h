@@ -90,7 +90,7 @@ struct gpu_fft_convolver : gpu_convolver<T> {
 	virtual std::shared_ptr<prepared_kernel> prepare_kernel(size_t h, bool adj) {
 		const T v = 1 / (M_SQRT2 * h);
 		boost::multi_array<T, 2> k(s);
-		fill(k, 0);
+		mimas::fill(k, 0);
 		for(size_t i0 = 0 ; i0 < h ; i0++)
 			for(size_t i1 = 0 ; i1 < h ; i1++) {
 				if(adj) k[i0][i1] = v;
@@ -140,7 +140,7 @@ struct cpu_fft_convolver : cpu_convolver<T> {
 	virtual std::shared_ptr<prepared_kernel> prepare_kernel(size_t h, bool adj) {
 		const T v = 1 / (s[0] * s[1] * M_SQRT2 * h);
 		boost::multi_array<T, 2> k(s);
-		fill(k, 0);
+		mimas::fill(k, 0);
 		for(size_t i0 = 0 ; i0 < h ; i0++)
 			for(size_t i1 = 0 ; i1 < h ; i1++) {
 				if(adj) k[i0][i1] = v;

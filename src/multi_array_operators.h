@@ -5,6 +5,8 @@
 #include "mimas/multi_array_op.h"
 #include <complex>
 
+namespace mimas {
+
 /** Fills an array with increasing values */
 template<class I, class A>
 void iota(A &a, I x = I()) {
@@ -71,6 +73,8 @@ boost::multi_array<T, N> real(const boost::multi_array<std::complex<T>, N> &a) {
 	auto out = mimas::empty_clone<T>(a);
 	mimas::multi_apply(out, a, [](T &o, const std::complex<T> &v){ o = real(v); });
 	return out;
+}
+
 }
 
 

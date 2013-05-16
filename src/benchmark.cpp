@@ -40,7 +40,7 @@ void bench(size_t image, size_t kernels) {
 	params<T> p(sz, kernel_sizes);
 	p.force_q = 3;
 	multi_array<T, 2> in(extents[image][image]);
-	fill(in, 1);
+	mimas::fill(in, 1);
 	cout << image << '\t' << kernels;
 	if(run_cpu) run<CPU_IMPL>(p, in);
 	if(run_gpu) {

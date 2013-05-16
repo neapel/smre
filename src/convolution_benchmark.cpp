@@ -52,7 +52,7 @@ void conv(size_t sz, const typename Conv::A &x, typename Conv::A &y, size_t h) {
 template<class Conv>
 void bench_cpu(size_t sz, size_t hs) {
 	multi_array<T, 2> x(extents[sz][sz]), y(x);
-	fill(x, 1);
+	mimas::fill(x, 1);
 	conv<Conv>(sz, x, y, hs);
 }
 

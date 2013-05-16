@@ -101,6 +101,7 @@ struct resolvent_l2_params : public resolvent_params<T> {
 
 template<class T>
 boost::multi_array<T, 2> laplacian(size2_t size) {
+	using namespace mimas;
 	const size_t m = size[0], n = size[1];
 	const std::array<size_t,1> me = {{m}}, ne = {{n}};
 	fftw::plan<T, T, 1> dct_m(me), dct_n(ne);

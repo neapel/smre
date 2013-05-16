@@ -69,6 +69,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 	}
 
 	void calc_q() {
+		using namespace mimas;
 		using namespace std;
 		const T q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
 			A data(p.size), convolved(p.size);
