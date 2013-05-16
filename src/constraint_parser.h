@@ -3,6 +3,7 @@
 
 #include <boost/regex.hpp>
 #include <boost/lexical_cast.hpp>
+#include <iostream>
 
 namespace std {
 	template<class I>
@@ -70,6 +71,13 @@ struct sizes_t : std::vector<size_t> {
 	sizes_t(std::initializer_list<size_t> l) : std::vector<size_t>(l) {}
 	sizes_t(std::vector<size_t> l) : std::vector<size_t>(l) {}
 };
+std::ostream &operator<<(std::ostream &o, const sizes_t &s) {
+	for(size_t i = 0 ; i < s.size() ; i++) {
+		if(i != 0) o << ',';
+		o << s[i];
+	}
+	return o;
+}
 
 void validate(boost::any &v, const std::vector<std::string> &values, sizes_t *, int) {
 	using namespace boost::program_options;
