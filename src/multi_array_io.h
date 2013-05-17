@@ -20,15 +20,26 @@ boost::multi_array<float, 2> pixbuf_to_multi_array(const Glib::RefPtr<Gdk::Pixbu
 
 // Copy multi_array data [-1:1] into a new pixbuf [0:255]
 // mark_outliers: <-1 = red, >1 = blue, exactly 0 = green
-Glib::RefPtr<Gdk::Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a) {
+Glib::RefPtr<Gdk::Pixbuf> multi_array_to_pixbuf(const boost::multi_array<float, 2> &a, bool auto_scale = false) {
 	auto h = a.shape()[0], w = a.shape()[1];
 	auto pb = Gdk::Pixbuf::create(Gdk::COLORSPACE_RGB, false, 8, w, h);
 	auto px = pb->get_pixels();
 	auto stride = pb->get_rowstride();
+	float min = 0, max = 0;
+	if(auto_scale) {
+		for(size_t y = 0 ; y != h ; y++)
+			for(size_t x = 0 ; x != w ; x++) {
+				if(a[y][x] > max) max = a[y][x];
+				if(a[y][x] < min) min = a[y][x];
+			}
+	} else {
+		min = -1;
+		max = 1;
+	}
 	for(size_t y = 0 ; y != h ; y++)
 		for(size_t x = 0 ; x != w ; x++) {
 			auto p = px + (y * stride + 3 * x);
-			float v = (a[y][x] + 1) / 2 * 255;
+			float v = (a[y][x] - min) / (max - min) * 255;
 			if(v < 0) v = 0;
 			if(v > 255) v = 255;
 			p[0] = p[1] = p[2] = v;

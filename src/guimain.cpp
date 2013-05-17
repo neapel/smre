@@ -27,7 +27,7 @@ struct main_window : Gtk::ApplicationWindow {
 	RefPtr<Pixbuf> input_image;
 
 	SpinButton alpha_value, tau_value, sigma_value, max_steps_value, force_q_value;
-	CheckButton impl_value, use_fft_value, resolv_value, penalized_scan_value, debug_value, do_force_q_value;
+	CheckButton impl_value, use_fft_value, resolv_value, penalized_scan_value, debug_value, do_force_q_value, auto_range_value;
 	Statusbar statusbar;
 	ProgressBar progress;
 	Notebook notebook;
@@ -62,7 +62,6 @@ struct main_window : Gtk::ApplicationWindow {
 	Threads::Thread *current_thread = nullptr;
 	bool continue_run = true;
 
-
 	Dispatcher update_progress, update_output, algorithm_done;
 
 	main_window(shared_ptr<params<T>> p)
@@ -78,6 +77,7 @@ struct main_window : Gtk::ApplicationWindow {
 	  penalized_scan_value{"Use penalized scan"},
 	  debug_value{"Debug log"},
 	  do_force_q_value{"q"},
+	  auto_range_value{"Display auto range"},
 	  constraints_model{ListStore::create(constraints_columns)},
 	  constraints_view{constraints_model},
 	  steps_model{ListStore::create(steps_columns)},
@@ -137,6 +137,7 @@ struct main_window : Gtk::ApplicationWindow {
 		options->attach_next_to(resolv_value, use_fft_value, POS_BOTTOM, 2, 1);
 		options->attach_next_to(penalized_scan_value, resolv_value, POS_BOTTOM, 2, 1);
 		options->attach_next_to(debug_value, penalized_scan_value, POS_BOTTOM, 2, 1);
+		options->attach_next_to(auto_range_value, debug_value, POS_BOTTOM, 2, 1);
 
 		// Connect to model
 		alpha_value.signal_value_changed().connect([=]{ p->alpha = alpha_value.get_value(); });
@@ -277,7 +278,7 @@ struct main_window : Gtk::ApplicationWindow {
 				update_progress();
 			};
 			run_p->current_cb = [=](const boost::multi_array<T,2> &a, size_t s) {
-				current_output = multi_array_to_pixbuf(a);
+				current_output = multi_array_to_pixbuf(a, auto_range_value.get_active());
 				update_output();
 				return continue_run;
 			};
