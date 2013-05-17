@@ -27,14 +27,6 @@ enum impl_t {
 #include "resolvent.h"
 
 
-template<class T>
-struct debug_state {
-	boost::multi_array<T, 2> img;
-	std::string name;
-	debug_state(boost::multi_array<T, 2> img, std::string name = "") : img(img), name(name) {}
-};
-
-
 /**
  * given \f$\tau_0, \sigma_0, K_i, x^0, y^0_i \in \mathbb R^I\f$.
  *
@@ -63,12 +55,11 @@ template<class T>
 struct params {
 	size_t max_steps = 10, monte_carlo_steps = 1000;
 	T alpha = 0.5, tau = 50, sigma = 1, input_variance = 1, force_q = -1;
-	bool debug = false, no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true;
+	bool no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true;
 	impl_t implementation = CPU_IMPL;
 	std::vector<size_t> kernel_sizes;
 	size2_t size;
 	std::shared_ptr<resolvent_params<T>> resolvent = std::make_shared<resolvent_l2_params<T>>();
-
 
 	params(size2_t size = {{0,0}}, std::vector<size_t> kernel_sizes = std::vector<size_t>())
 	: kernel_sizes(kernel_sizes), size(size) {}
@@ -86,12 +77,31 @@ struct params {
 template<class T>
 struct impl {
 	const params<T> &p;
-	std::vector<debug_state<T>> debug_log;
 
-	impl(const params<T> &p) : p(p), debug_log() {}
+	// current progress [0:1]
+	std::function<void(double)> progress_cb{nullptr};
+	// current status. Breaks if true is returned, result is current status.
+	std::function<bool(const boost::multi_array<T, 2> &, size_t step)> current_cb{nullptr};
+	// debug.
+	std::function<void(const boost::multi_array<T, 2> &, std::string desc)> debug_cb{nullptr};
+
+	impl(const params<T> &p) : p(p) {}
 	virtual ~impl() {}
 
 	virtual boost::multi_array<T, 2> run(const boost::multi_array<T,2> &) = 0;
+
+	virtual void progress(double q) {
+		if(progress_cb) progress_cb(q);
+	}
+
+	virtual bool current(const boost::multi_array<T,2> &a, size_t s) {
+		if(current_cb) return current_cb(a, s);
+		return true;
+	}
+
+	virtual void debug(const boost::multi_array<T,2> &a, std::string d) {
+		if(debug_cb) debug_cb(a, d);
+	}
 
 protected:
 	T cached_q(std::function<void(std::vector<std::vector<T>>&)> calc) {

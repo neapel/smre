@@ -84,6 +84,23 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 	}
 
 
+	bool current(const A &a, size_t s) {
+		if(impl<T>::current_cb) {
+			boost::multi_array<T, 2> a_(p.size);
+			copy(a, a_.data());
+			return impl<T>::current_cb(a_, s);
+		}
+		return true;
+	}
+
+	void debug(const A &a, std::string d) {
+		if(impl<T>::debug_cb) {
+			boost::multi_array<T, 2> a_(p.size);
+			copy(a, a_.data());
+			impl<T>::debug_cb(a_, d);
+		}
+	}
+
 	virtual boost::multi_array<T, 2> run(const boost::multi_array<T, 2> &Y__) {
 		auto Y_ = Y__;
 #if DEBUG_WATERMARK
@@ -98,21 +115,12 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 		return out_;
 	}
 
-	#define debug(buffer, n) \
-		if(p.debug) {\
-			std::cerr << #buffer << " (" << #n << "=" << (n) << ")" << std::endl; \
-			boost::multi_array<T,2> __data(p.size); \
-			copy(buffer, __data.data()); \
-			impl<T>::debug_log.emplace_back(__data, #buffer); \
-		}
-
 	virtual void run(A &Y, A &out) {
 		A x(Y), bar_x(Y), old_x(size_1d), w(size_1d), convolved(size_1d);
 
-		debug(x,0)
+		debug(x, "x_in");
 		for(auto &c : constraints) {
 			c.y = 0;
-			debug(c.y,0)
 		}
 
 		T tau = p.tau;
@@ -127,36 +135,39 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 			w = 0.0f;
 			// transform bar_x for convolutions
 			auto f_bar_x = convolution->prepare_image(bar_x);
-			for(auto &c : constraints) {
+			for(size_t i = 0 ; i < constraints.size() ; i++) {
+				auto c = constraints[i];
 				// convolve bar_x with kernel
 				convolution->conv(f_bar_x, c.k, convolved);
-				debug(convolved,n)
+				debug(convolved, "convolved_i");
 				// calculate new y_i
 				c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma);
-				debug(c.y,n)
+				debug(c.y, "y_i");
 				// convolve y_i with conjugate transpose of kernel
 				auto f_y = convolution->prepare_image(c.y);
 				convolution->conv(f_y, c.adj_k, convolved);
-				debug(convolved,n)
+				debug(convolved, "adj_convolved_i");
 				// accumulate
 				w += convolved;
-				debug(w,n)
+				debug(w, "accum");
+				this->progress(double(n * constraints.size() + i) / (p.max_steps * constraints.size()));
 			}
 
 			old_x = x;
 			bar_x = x - Y - w*tau;
-			debug(bar_x,n)
+			debug(bar_x, "bar_x");
 			resolvent->evaluate(tau, bar_x, x);
 			x += Y;
-			debug(x,n)
+			debug(x, "resolv_x");
 			const T theta = 1 / sqrt(1 + 2 * tau * resolvent->gamma);
 			tau *= theta;
 			sigma /= theta;
 			bar_x = x + (x - old_x) * theta;
-			debug(bar_x,n)
+			debug(bar_x, "bar_x");
+
+			out = Y - x;
+			if(!current(out, n)) break;
 		}
-		out = Y - x;
-		debug(out,0)
 	}
 
 	#undef debug

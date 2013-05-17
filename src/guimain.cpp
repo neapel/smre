@@ -29,9 +29,9 @@ struct main_window : Gtk::ApplicationWindow {
 	SpinButton alpha_value, tau_value, sigma_value, max_steps_value, force_q_value;
 	CheckButton impl_value, use_fft_value, resolv_value, penalized_scan_value, debug_value, do_force_q_value;
 	Statusbar statusbar;
-	Spinner progress;
+	ProgressBar progress;
 	Notebook notebook;
-	Image original_image, output_image;
+	Image input_image_view, output_image_view;
 
 	struct cc : TreeModel::ColumnRecord {
 		TreeModelColumn<size_t> kernel;
@@ -49,21 +49,32 @@ struct main_window : Gtk::ApplicationWindow {
 	TreeView steps_view;
 
 	Menu constraints_menu;
-	RefPtr<Action> add_constraint, remove_constraint, load_image, run;
+	RefPtr<Action> add_constraint, remove_constraint, load_image, run, stop;
 
-	vector<debug_state<T>> current_log, previous_log;
-	Dispatcher algorithm_done;
+	struct debug_state {
+		RefPtr<Pixbuf> img;
+		string desc;
+	};
+	vector<debug_state> current_log, previous_log;
+	RefPtr<Pixbuf> current_output;
+	double progress_value;
+
+	Threads::Thread *current_thread = nullptr;
+	bool continue_run = true;
+
+
+	Dispatcher update_progress, update_output, algorithm_done;
 
 	main_window(shared_ptr<params<T>> p)
 	: p(p),
 	  alpha_value{Adjustment::create(p->alpha, 0, 1), 0, 2},
-	  tau_value{Adjustment::create(p->tau, 0, 1000), 0, 2},
-	  sigma_value{Adjustment::create(p->sigma, 0, 5), 0, 2},
-	  max_steps_value{Adjustment::create(p->max_steps, 1, 100)},
-	  force_q_value{Adjustment::create(p->force_q, 0, 10), 0, 2},
+	  tau_value{Adjustment::create(p->tau, 0, 10000), 0, 0},
+	  sigma_value{Adjustment::create(p->sigma, 0, 5), 0, 4},
+	  max_steps_value{Adjustment::create(p->max_steps, 1, 1000)},
+	  force_q_value{Adjustment::create(p->force_q, 0, 100), 0, 3},
 	  impl_value{"Use OpenCL"},
 	  use_fft_value{"Use FFT"},
-	  resolv_value{"Use H1 resolvent"},
+	  resolv_value{"Use H₁ resolvent"},
 	  penalized_scan_value{"Use penalized scan"},
 	  debug_value{"Debug log"},
 	  do_force_q_value{"q"},
@@ -73,13 +84,15 @@ struct main_window : Gtk::ApplicationWindow {
 	  steps_view{steps_model},
 	  add_constraint{Action::create("add_constraint", Stock::ADD, "_Add Constraint")},
 	  remove_constraint{Action::create("remove_constraint", Stock::REMOVE, "Remo_ve Constraint")},
-	  load_image{Action::create("load_image", Stock::OPEN, "_Load Image")},
-	  run{Action::create("run", Stock::EXECUTE, "_Run Chambolle-Pock")}
+	  load_image{Action::create("load_image", Stock::OPEN, "_Load")},
+	  run{Action::create("run", Stock::EXECUTE, "_Run")},
+	  stop{Action::create("stop", Stock::STOP, "_Stop")}
 	{
 		// Main layout
 		auto vbox = manage(new VBox());
 		add(*vbox);
 		auto toolbar = manage(new Toolbar());
+		toolbar->get_style_context()->add_class(GTK_STYLE_CLASS_PRIMARY_TOOLBAR);
 		vbox->pack_start(*toolbar, PACK_SHRINK);
 
 		// Actions
@@ -91,6 +104,11 @@ struct main_window : Gtk::ApplicationWindow {
 		run->set_sensitive(false);
 		run->signal_activate().connect([&]{do_run();});
 		toolbar->append(*run->create_tool_item());
+
+		stop->set_is_important(true);
+		stop->set_sensitive(false);
+		stop->signal_activate().connect([&]{ continue_run = false; });
+		toolbar->append(*stop->create_tool_item());
 
 		// Main area
 		auto paned = manage(new HBox());
@@ -144,11 +162,6 @@ struct main_window : Gtk::ApplicationWindow {
 		penalized_scan_value.set_active(p->penalized_scan);
 		penalized_scan_value.signal_toggled().connect([=]{ p->penalized_scan = penalized_scan_value.get_active(); });
 
-		debug_value.set_active(p->debug);
-		debug_value.signal_toggled().connect([=]{ p->debug = debug_value.get_active(); });
-
-
-
 		// Constraints Table
 		for(auto cons : p->kernel_sizes) {
 			auto row = *constraints_model->append();
@@ -158,7 +171,6 @@ struct main_window : Gtk::ApplicationWindow {
 			auto row = *constraints_model->append();
 			row[constraints_columns.kernel] = 3;
 		});
-		toolbar->append(*add_constraint->create_tool_item());
 		constraints_menu.append(*add_constraint->create_menu_item());
 
 		constraints_view.get_selection()->signal_changed().connect([&]{
@@ -168,7 +180,6 @@ struct main_window : Gtk::ApplicationWindow {
 			auto it = constraints_view.get_selection()->get_selected();
 			if(it) constraints_model->erase(it);
 		});
-		toolbar->append(*remove_constraint->create_tool_item());
 		constraints_menu.append(*remove_constraint->create_menu_item());
 
 		constraints_view.signal_button_press_event().connect_notify([&](GdkEventButton *evt){
@@ -185,10 +196,10 @@ struct main_window : Gtk::ApplicationWindow {
 		paned->pack_start(notebook);
 		// Scroll-locked image views for comparison
 		auto original_scroll = manage(new ScrolledWindow());
-		original_scroll->add(original_image);
+		original_scroll->add(input_image_view);
 		notebook.append_page(*original_scroll, "Input");
 		auto output_scroll = manage(new ScrolledWindow(original_scroll->get_hadjustment(), original_scroll->get_vadjustment()));
-		output_scroll->add(output_image);
+		output_scroll->add(output_image_view);
 		notebook.append_page(*output_scroll, "Output");
 		// Debug details
 		auto scrolled_window = manage(new ScrolledWindow());
@@ -209,8 +220,80 @@ struct main_window : Gtk::ApplicationWindow {
 
 		progress.hide();
 
-		algorithm_done.connect([&]{ on_algorithm_done(); });
+		update_progress.connect([&]{
+			progress.set_fraction(progress_value);
+		});
+
+		update_output.connect([&]{
+			output_image_view.set(current_output);
+			notebook.set_current_page(1);
+		});
+
+		algorithm_done.connect([&]{
+			if(current_thread) current_thread->join();
+			current_thread = nullptr;
+			if(debug_value.get_active()) {
+				steps_model->clear();
+				for(size_t i = 0 ; i < current_log.size() ; i++) {
+					auto row = *steps_model->append();
+					row[steps_columns.name] = current_log[i].desc;
+					row[steps_columns.img] = current_log[i].img;
+					if(i < previous_log.size())
+						row[steps_columns.old_img] = previous_log[i].img;
+				}
+				swap(current_log, previous_log);
+				notebook.set_current_page(2);
+			}
+			progress.hide();
+			run->set_sensitive(true);
+			stop->set_sensitive(false);
+		});
 	}
+
+	// Run the algorithm in a new thread.
+	void do_run() {
+		if(constraints_model->children().size() == 0) {
+			cerr << "no constraints" << endl;
+			return;
+		}
+		progress.show();
+		run->set_sensitive(false);
+		stop->set_sensitive(true);
+		current_log.clear();
+
+		p->kernel_sizes.clear();
+		for(TreeRow r : constraints_model->children())
+			p->kernel_sizes.push_back(r.get_value(constraints_columns.kernel));
+
+		// start thread
+		continue_run = true;
+		current_thread = Threads::Thread::create([=/* & doesn't work with threads */]{
+			// The image to process
+			auto input = pixbuf_to_multi_array(input_image);
+			p->set_size(input.shape());
+			auto run_p = p->runner();
+			run_p->progress_cb = [=](double p) {
+				progress_value = p;
+				update_progress();
+			};
+			run_p->current_cb = [=](const boost::multi_array<T,2> &a, size_t s) {
+				current_output = multi_array_to_pixbuf(a);
+				update_output();
+				return continue_run;
+			};
+			if(debug_value.get_active())
+				run_p->debug_cb = [=](const boost::multi_array<T,2> &a, string desc) {
+					#pragma omp critical
+					{
+						auto img = multi_array_to_pixbuf(a);
+						current_log.push_back(debug_state{img, desc});
+					}
+				};
+			auto result = run_p->run(input);
+			algorithm_done();
+		});
+	}
+
 
 	// Select and load the image into a pixbuf.
 	void do_load_image() {
@@ -228,62 +311,13 @@ struct main_window : Gtk::ApplicationWindow {
 
 	void open(RefPtr<Pixbuf> image) {
 		input_image = image;
-		original_image.set(input_image);
-		output_image.set(input_image);
+		input_image_view.set(input_image);
+		output_image_view.set(input_image);
 		run->set_sensitive(true);
 	}
 
 	void open(string filename) {
 		open(Pixbuf::create_from_file(filename));
-	}
-
-	// Run the algorithm in a new thread.
-	void do_run() {
-		if(constraints_model->children().size() == 0) {
-			cerr << "no constraints" << endl;
-			return;
-		}
-
-		progress.start();
-		progress.show();
-
-		// Actually create constraints now.
-		p->kernel_sizes.clear();
-		for(TreeRow r : constraints_model->children()) {
-			const auto ks = r.get_value(constraints_columns.kernel);
-			p->kernel_sizes.push_back(ks);
-		}
-
-		// start thread
-		Threads::Thread::create([=/* & doesn't work with threads */]{
-			// The image to process
-			auto input = pixbuf_to_multi_array(input_image);
-			p->set_size(input.shape());
-			auto run_p = p->runner();
-			auto result = run_p->run(input);
-			if(p->debug) {
-				swap(current_log, previous_log);
-				swap(current_log, run_p->debug_log);
-			}
-			output_image.set(multi_array_to_pixbuf(result));
-			algorithm_done();
-		});
-	}
-
-	void on_algorithm_done() {
-		if(p->debug) {
-			steps_model->clear();
-			for(size_t i = 0 ; i < current_log.size() ; i++) {
-				auto row = *steps_model->append();
-				row[steps_columns.name] = current_log[i].name;
-				row[steps_columns.img] = multi_array_to_pixbuf(current_log[i].img);
-				if(i < previous_log.size())
-					row[steps_columns.old_img] = multi_array_to_pixbuf(previous_log[i].img);
-			}
-		}
-		progress.stop();
-		progress.hide();
-		notebook.set_current_page(p->debug ? 2 : 1); // output
 	}
 
 };
@@ -350,7 +384,7 @@ struct app_t : Gtk::Application {
 		group.add_entry(entry("no-cache", "don't use the monte carlo cache"), p->no_cache);
 		group.add_entry(entry("penalized-scan", "use penalized scan statistic"), p->penalized_scan);
 		group.add_entry(entry("mc-dump", "dump mc data for each kernel"), p->dump_mc);
-		group.add_entry(entry("debug", "enable debug output"), p->debug);
+		//group.add_entry(entry("debug", "enable debug output"), p->debug);
 		group.add_entry(entry("constraint", "kernel sizes, comma separated list or '<start>,<next>,...,<end>'"), mem_fun(*this, &app_t::parse_constraint));
 		group.add_entry(entry("resolvent", "'l2' or 'h1'"), mem_fun(*this, &app_t::parse_resolvent));
 		group.add_entry(entry("use-fft", "use FFT for convolution (or SAT)"), use_fft);

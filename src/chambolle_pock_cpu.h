@@ -91,13 +91,6 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			c.q = q + c.shift_q;
 	}
 
-
-	#define debug(buffer, n) \
-		if(p.debug) { \
-			std::cerr << #buffer << " (" << #n << "=" << (n) << ")" << std::endl; \
-			impl<T>::debug_log.emplace_back(buffer, #buffer); \
-		}
-
 	virtual A run(const A &Y_) {
 		using namespace mimas;
 
@@ -108,17 +101,11 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 				Y[i0 + 20][i1 + p.size[1] - 40] = 0;		
 #endif
 
-#if HAVE_OPENMP
-		const int original_threads = omp_get_num_threads();
-		if(p.debug) omp_set_num_threads(1);
-#endif
+		A x(Y), bar_x(Y), old_x(p.size), w(p.size), out(p.size);
 
-		A x(Y), bar_x(Y), old_x(p.size), w(p.size);
-
-		debug(x,0)
+		this->debug(x, "x_in");
 		for(auto &c : constraints) {
 			fill(c.y, 0);
-			debug(c.y,0)
 		}
 
 		T tau = p.tau;
@@ -139,29 +126,31 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 				// convolve bar_x with kernel
 				A convolved(p.size);
 				convolution->conv(f_bar_x, c.k, convolved);
+				this->debug(convolved, "convolved_i");
 				// calculate new y_i
 				convolved *= sigma;
 				c.y += convolved;
 				c.y = mimas::multi_func<T>(c.y,
 					[&](T v){return soft_shrink(v, c.q * sigma);});
-				debug(c.y,n)
+				this->debug(c.y, "y_i");
 				// convolve y_i with conjugate transpose of kernel
 				auto f_y = convolution->prepare_image(c.y);
 				convolution->conv(f_y, c.adj_k, convolved);
-				debug(convolved,n)
+				this->debug(convolved, "adj_convolved_i");
 				// accumulate
 				#pragma omp critical
 				w += convolved;
-				debug(w,n)
+				this->debug(w, "accum");
 			}
+			this->progress(double(n) / p.max_steps);
 
 			old_x = x;
 			w *= tau;
 			bar_x = x; bar_x -= Y; bar_x -= tau;
-			debug(bar_x,n)
+			this->debug(bar_x, "bar_x");
 			resolvent->evaluate(tau, bar_x, x);
 			x += Y;
-			debug(x,n)
+			this->debug(x, "resolv_x");
 			const T theta = 1 / sqrt(1 + 2 * tau * resolvent->gamma);
 			tau *= theta;
 			sigma /= theta;
@@ -169,14 +158,13 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			bar_x -= old_x;
 			bar_x *= theta;
 			bar_x += x;
-			debug(bar_x,n)
+			this->debug(bar_x, "bar_x");
+
+			out = Y;
+			out -= x;
+			if(!this->current(out, n)) break;
 		}
-		Y -= x;
-		debug(Y,0)
-#if HAVE_OPENMP
-		if(p.debug) omp_set_num_threads(original_threads);
-#endif
-		return Y;
+		return out;
 	}
 
 	#undef debug
