@@ -35,6 +35,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 	std::vector<constraint> constraints;
 	std::unique_ptr<resolvent_impl<GPU_IMPL, T>> resolvent;
 	std::unique_ptr<convolver<A>> convolution;
+	bool initialized = false;
 
 	chambolle_pock(const params<T> &p)
 	: impl<T>(p),
@@ -42,7 +43,6 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 	  resolvent(p.resolvent->gpu_runner(p.size)) {
 		if(p.use_fft) convolution.reset(new gpu_fft_convolver<T>(p.size));
 		else convolution.reset(new gpu_sat_convolver<T>(p.size));
-		update_kernels();
 	}
 
 	void update_kernels() {
@@ -62,7 +62,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 
 	void calc_q() {
 		// If needed, calculate `q/sigma` value.
-		T q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
+		impl<T>::q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
 			const vex::Reductor<T, vex::MAX> max;
 			A data(size_1d), convolved(size_1d);
 			vex::RandomNormal<T> random;
@@ -77,10 +77,11 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 					auto k_q = norm_inf - constraints[j].shift_q;
 					k_qs[j].push_back(k_q);
 				}
+				this->progress(double(i) / p.monte_carlo_steps);
 			}
 		});
 		for(auto &c : constraints)
-			c.q = q + c.shift_q;
+			c.q = impl<T>::q + c.shift_q;
 	}
 
 
@@ -117,6 +118,11 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 
 	virtual void run(A &Y, A &out) {
 		A x(Y), bar_x(Y), old_x(size_1d), w(size_1d), convolved(size_1d);
+
+		if(!initialized) {
+			update_kernels();
+			initialized = true;
+		}
 
 		debug(x, "x_in");
 		for(auto &c : constraints) {

@@ -43,14 +43,13 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 	std::vector<constraint> constraints;
 	std::unique_ptr<resolvent_impl<CPU_IMPL, T>> resolvent;
 	std::unique_ptr<convolver<A>> convolution;
-
+	bool initialized = false;
 
 	chambolle_pock(const params<T> &p)
 	: impl<T>(p),
 	  resolvent(p.resolvent->cpu_runner(p.size)) {
 		if(p.use_fft) convolution.reset(new cpu_fft_convolver<T>(p.size));
 		else convolution.reset(new cpu_sat_convolver<T>(p.size));
-		update_kernels();
 	}
 
 	void update_kernels() {
@@ -71,7 +70,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 	void calc_q() {
 		using namespace mimas;
 		using namespace std;
-		const T q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
+		impl<T>::q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
 			A data(p.size), convolved(p.size);
 			random_device dev;
 			mt19937 gen(dev());
@@ -88,7 +87,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			}
 		});
 		for(auto &c : constraints)
-			c.q = q + c.shift_q;
+			c.q = impl<T>::q + c.shift_q;
 	}
 
 	virtual A run(const A &Y_) {
@@ -102,6 +101,11 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 #endif
 
 		A x(Y), bar_x(Y), old_x(p.size), w(p.size), out(p.size);
+
+		if(!initialized) {
+			update_kernels();
+			initialized = true;
+		}
 
 		this->debug(x, "x_in");
 		for(auto &c : constraints) {

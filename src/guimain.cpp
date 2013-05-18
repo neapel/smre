@@ -291,6 +291,7 @@ struct main_window : Gtk::ApplicationWindow {
 					}
 				};
 			auto result = run_p->run(input);
+			force_q_value.set_value(run_p->q);
 			algorithm_done();
 		});
 	}

@@ -77,6 +77,7 @@ struct params {
 template<class T>
 struct impl {
 	const params<T> &p;
+	T q;
 
 	// current progress [0:1]
 	std::function<void(double)> progress_cb{nullptr};
