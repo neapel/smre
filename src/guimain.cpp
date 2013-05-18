@@ -26,8 +26,19 @@ struct main_window : Gtk::ApplicationWindow {
 	shared_ptr<params<T>> p;
 	RefPtr<Pixbuf> input_image;
 
-	SpinButton alpha_value, tau_value, sigma_value, max_steps_value, force_q_value;
-	CheckButton impl_value, use_fft_value, resolv_value, penalized_scan_value, debug_value, do_force_q_value, auto_range_value;
+	SpinButton alpha_value{Adjustment::create(p->alpha, 0, 1), 0, 2};
+	SpinButton tau_value{Adjustment::create(p->tau, 0, 10000), 0, 0};
+	SpinButton sigma_value{Adjustment::create(p->sigma, 0, 5), 0, 4};
+	SpinButton max_steps_value{Adjustment::create(p->max_steps, 1, 1000)};
+	SpinButton force_q_value{Adjustment::create(p->force_q, 0, 100), 0, 3};
+	SpinButton mc_steps_value{Adjustment::create(p->monte_carlo_steps, 1, 10000), 0, 0};
+	CheckButton impl_value{"Use OpenCL"};
+	CheckButton use_fft_value{"Use FFT for convolution"};
+	CheckButton resolv_value{"Use H₁ resolvent"};
+	CheckButton penalized_scan_value{"Use penalized scan"};
+	CheckButton debug_value{"Debug log"};
+	CheckButton do_force_q_value{"Threshold (q)"};
+	CheckButton auto_range_value{"Display with auto range"};
 	Entry kernels_value;
 
 	Statusbar statusbar;
@@ -40,11 +51,13 @@ struct main_window : Gtk::ApplicationWindow {
 		TreeModelColumn<string> name;
 		cs() { add(img); add(old_img); add(name); }
 	} steps_columns;
-	RefPtr<ListStore> steps_model;
-	TreeView steps_view;
+	RefPtr<ListStore> steps_model{ListStore::create(steps_columns)};
+	TreeView steps_view{steps_model};
 
 	Menu constraints_menu;
-	RefPtr<Action> load_image, run, stop;
+	RefPtr<Action> load_image{Action::create("load_image", Stock::OPEN, "_Load")};
+	RefPtr<Action> run{Action::create("run", Stock::MEDIA_PLAY, "_Run")};
+	RefPtr<Action> stop{Action::create("stop", Stock::MEDIA_STOP, "_Stop")};
 
 	struct debug_state {
 		RefPtr<Pixbuf> img;
@@ -59,26 +72,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 	Dispatcher update_progress, update_output, algorithm_done;
 
-	main_window(shared_ptr<params<T>> p)
-	: p(p),
-	  alpha_value{Adjustment::create(p->alpha, 0, 1), 0, 2},
-	  tau_value{Adjustment::create(p->tau, 0, 10000), 0, 0},
-	  sigma_value{Adjustment::create(p->sigma, 0, 5), 0, 4},
-	  max_steps_value{Adjustment::create(p->max_steps, 1, 1000)},
-	  force_q_value{Adjustment::create(p->force_q, 0, 100), 0, 3},
-	  impl_value{"Use OpenCL"},
-	  use_fft_value{"Use FFT"},
-	  resolv_value{"Use H₁ resolvent"},
-	  penalized_scan_value{"Use penalized scan"},
-	  debug_value{"Debug log"},
-	  do_force_q_value{"q"},
-	  auto_range_value{"Display auto range"},
-	  steps_model{ListStore::create(steps_columns)},
-	  steps_view{steps_model},
-	  load_image{Action::create("load_image", Stock::OPEN, "_Load")},
-	  run{Action::create("run", Stock::MEDIA_PLAY, "_Run")},
-	  stop{Action::create("stop", Stock::MEDIA_STOP, "_Stop")}
-	{
+	main_window(shared_ptr<params<T>> p) : p(p) {
 		// Main layout
 		auto vbox = manage(new VBox());
 		add(*vbox);
@@ -112,39 +106,62 @@ struct main_window : Gtk::ApplicationWindow {
 		left_pane->pack_start(*options, PACK_SHRINK);
 		options->set_border_width(10);
 		options->set_column_spacing(5);
-		auto tau_label = manage(new Label("τ", ALIGN_START));
-		options->attach(*tau_label, 0, 0, 1, 1);
-		options->attach_next_to(tau_value, *tau_label, POS_RIGHT, 1, 1);
-		auto sigma_label = manage(new Label("σ", ALIGN_START));
-		options->attach_next_to(*sigma_label, *tau_label, POS_BOTTOM, 1, 1);
-		options->attach_next_to(sigma_value, *sigma_label, POS_RIGHT, 1, 1);
-		options->attach_next_to(do_force_q_value, *sigma_label, POS_BOTTOM, 1, 1);
-		options->attach_next_to(force_q_value, do_force_q_value, POS_RIGHT, 1, 1);
-		auto max_steps_label = manage(new Label("Steps", ALIGN_START));
-		options->attach_next_to(*max_steps_label, do_force_q_value, POS_BOTTOM, 1, 1);
-		options->attach_next_to(max_steps_value, *max_steps_label, POS_RIGHT, 1, 1);
-		options->attach_next_to(impl_value, *max_steps_label, POS_BOTTOM, 2, 1);
-		options->attach_next_to(use_fft_value, impl_value, POS_BOTTOM, 2, 1);
-		options->attach_next_to(resolv_value, use_fft_value, POS_BOTTOM, 2, 1);
-		options->attach_next_to(penalized_scan_value, resolv_value, POS_BOTTOM, 2, 1);
-		options->attach_next_to(debug_value, penalized_scan_value, POS_BOTTOM, 2, 1);
-		options->attach_next_to(auto_range_value, debug_value, POS_BOTTOM, 2, 1);
+		options->set_row_spacing(5);
+		int row = 0;
 
-		auto kernels_label = manage(new Label("h", ALIGN_START));
-		options->attach_next_to(*kernels_label, auto_range_value, POS_BOTTOM, 1, 1);
-		options->attach_next_to(kernels_value, *kernels_label, POS_RIGHT, 1, 1);
+		options->attach(impl_value, 0, row++, 2, 1);
+
+		auto kernels_label = manage(new Label("Kernel sizes (h)", ALIGN_START));
+		options->attach(*kernels_label, 0, row, 1, 1);
 		kernels_value.set_placeholder_text("1,3,...,10; 50..55");
 		kernels_value.set_text("2,4,...,50");
+		options->attach(kernels_value, 1, row++, 1, 1);
+
+		options->attach(use_fft_value, 0, row++, 2, 1);
+
+		auto max_steps_label = manage(new Label("Max. steps", ALIGN_START));
+		options->attach(*max_steps_label, 0, row, 1, 1);
+		options->attach(max_steps_value, 1, row++, 1, 1);
+
+		auto tau_label = manage(new Label("Step (τ)", ALIGN_START));
+		options->attach(*tau_label, 0, row, 1, 1);
+		options->attach(tau_value, 1, row++, 1, 1);
+
+		auto sigma_label = manage(new Label("Step (σ)", ALIGN_START));
+		options->attach(*sigma_label, 0, row, 1, 1);
+		options->attach(sigma_value, 1, row++, 1, 1);
+
+		options->attach(resolv_value, 0, row++, 2, 1);
+
+		options->attach(do_force_q_value, 0, row, 1, 1);
+		options->attach(force_q_value, 1, row++, 1, 1);
+
+		auto mc_steps_label = manage(new Label("MC Steps", ALIGN_START));
+		options->attach(*mc_steps_label, 0, row, 1, 1);
+		options->attach(mc_steps_value, 1, row++, 1, 1);
+
+		options->attach(penalized_scan_value, 0, row++, 2, 1);
+
+		options->attach(debug_value, 0, row++, 2, 1);
+		options->attach(auto_range_value, 0, row++, 2, 1);
 
 		// Connect to model
 		alpha_value.signal_value_changed().connect([=]{ p->alpha = alpha_value.get_value(); });
 		tau_value.signal_value_changed().connect([=]{ p->tau = tau_value.get_value(); });
 		sigma_value.signal_value_changed().connect([=]{ p->sigma = sigma_value.get_value(); });
 		max_steps_value.signal_value_changed().connect([=]{ p->max_steps = max_steps_value.get_value(); });
-		auto q_ = [=]{ p->force_q = do_force_q_value.get_active() ? force_q_value.get_value() : -1; };
+		mc_steps_value.signal_value_changed().connect([=]{ p->monte_carlo_steps = mc_steps_value.get_value(); });
+
+		auto q_ = [=]{
+			const bool f = do_force_q_value.get_active();
+			mc_steps_value.set_sensitive(!f);
+			force_q_value.set_sensitive(f);
+			p->force_q = f ? force_q_value.get_value() : -1;
+		};
 		do_force_q_value.set_active(p->force_q >= 0);
 		do_force_q_value.signal_toggled().connect(q_);
 		force_q_value.signal_value_changed().connect(q_);
+		q_();
 
 		impl_value.set_active(p->implementation == GPU_IMPL);
 		impl_value.signal_toggled().connect([=]{ p->implementation = impl_value.get_active() ? GPU_IMPL : CPU_IMPL; });
@@ -195,7 +212,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 		constraints_menu.show_all();
 		show_all_children();
-		set_default_size(800, 600);
+		set_default_size(1000, 800);
 
 		progress.hide();
 
