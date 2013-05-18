@@ -27,8 +27,8 @@ std::vector<size_t> list_expression(std::string expr) {
 	using namespace boost;
 	using namespace std;
 	vector<size_t> expr_l;
-	regex r_pow("((?<base>\\d+)(\\^|\\*\\*))?(?<start>\\d+)((?<list>(,(\\d+))+)|((,(?<next>\\d+))?,?\\.{2,},?(?<end>\\d+)))?");
-	regex r_expr("[;:+]"), r_list("\\d+");
+	regex r_pow(R"(\s*((?<base>\d+)\s*(\^|\*\*)\s*)?(?<start>\d+)((?<list>(\s*,\s*(\d+))+)|((\s*,\s*(?<next>\d+))?\s*,?\s*\.{2,}\s*,?\s*(?<end>\d+)))?\s*)");
+	regex r_expr(R"([;:+])"), r_list(R"(\d+)");
 	for(auto s_pow : make_regex_token_iterator(expr, r_expr, -1)) {
 		auto s = s_pow.str(); // mandatory??? regex_match(s_pow.str()...) breaks.
 		smatch m;
@@ -61,6 +61,7 @@ std::vector<size_t> list_expression(std::string expr) {
 	sort(expr_l.begin(), expr_l.end());
 	vector<size_t> out;
 	unique_copy(expr_l.begin(), expr_l.end(), back_inserter(out));
+	if(out.empty()) throw invalid_argument("empty lsit expression.");
 	return out;
 }
 
