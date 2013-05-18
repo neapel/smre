@@ -28,17 +28,12 @@ struct main_window : Gtk::ApplicationWindow {
 
 	SpinButton alpha_value, tau_value, sigma_value, max_steps_value, force_q_value;
 	CheckButton impl_value, use_fft_value, resolv_value, penalized_scan_value, debug_value, do_force_q_value, auto_range_value;
+	Entry kernels_value;
+
 	Statusbar statusbar;
 	ProgressBar progress;
 	Notebook notebook;
 	Image input_image_view, output_image_view;
-
-	struct cc : TreeModel::ColumnRecord {
-		TreeModelColumn<size_t> kernel;
-		cc() { add(kernel); }
-	} constraints_columns;
-	RefPtr<ListStore> constraints_model;
-	TreeView constraints_view;
 
 	struct cs : TreeModel::ColumnRecord {
 		TreeModelColumn<RefPtr<Pixbuf>> img, old_img;
@@ -49,7 +44,7 @@ struct main_window : Gtk::ApplicationWindow {
 	TreeView steps_view;
 
 	Menu constraints_menu;
-	RefPtr<Action> add_constraint, remove_constraint, load_image, run, stop;
+	RefPtr<Action> load_image, run, stop;
 
 	struct debug_state {
 		RefPtr<Pixbuf> img;
@@ -78,15 +73,11 @@ struct main_window : Gtk::ApplicationWindow {
 	  debug_value{"Debug log"},
 	  do_force_q_value{"q"},
 	  auto_range_value{"Display auto range"},
-	  constraints_model{ListStore::create(constraints_columns)},
-	  constraints_view{constraints_model},
 	  steps_model{ListStore::create(steps_columns)},
 	  steps_view{steps_model},
-	  add_constraint{Action::create("add_constraint", Stock::ADD, "_Add Constraint")},
-	  remove_constraint{Action::create("remove_constraint", Stock::REMOVE, "Remo_ve Constraint")},
 	  load_image{Action::create("load_image", Stock::OPEN, "_Load")},
-	  run{Action::create("run", Stock::EXECUTE, "_Run")},
-	  stop{Action::create("stop", Stock::STOP, "_Stop")}
+	  run{Action::create("run", Stock::MEDIA_PLAY, "_Run")},
+	  stop{Action::create("stop", Stock::MEDIA_STOP, "_Stop")}
 	{
 		// Main layout
 		auto vbox = manage(new VBox());
@@ -139,6 +130,12 @@ struct main_window : Gtk::ApplicationWindow {
 		options->attach_next_to(debug_value, penalized_scan_value, POS_BOTTOM, 2, 1);
 		options->attach_next_to(auto_range_value, debug_value, POS_BOTTOM, 2, 1);
 
+		auto kernels_label = manage(new Label("h", ALIGN_START));
+		options->attach_next_to(*kernels_label, auto_range_value, POS_BOTTOM, 1, 1);
+		options->attach_next_to(kernels_value, *kernels_label, POS_RIGHT, 1, 1);
+		kernels_value.set_placeholder_text("1,3,...,10; 50..55");
+		kernels_value.set_text("2,4,...,50");
+
 		// Connect to model
 		alpha_value.signal_value_changed().connect([=]{ p->alpha = alpha_value.get_value(); });
 		tau_value.signal_value_changed().connect([=]{ p->tau = tau_value.get_value(); });
@@ -163,35 +160,16 @@ struct main_window : Gtk::ApplicationWindow {
 		penalized_scan_value.set_active(p->penalized_scan);
 		penalized_scan_value.signal_toggled().connect([=]{ p->penalized_scan = penalized_scan_value.get_active(); });
 
-		// Constraints Table
-		for(auto cons : p->kernel_sizes) {
-			auto row = *constraints_model->append();
-			row[constraints_columns.kernel] = cons;
-		}
-		add_constraint->signal_activate().connect([&]{
-			auto row = *constraints_model->append();
-			row[constraints_columns.kernel] = 3;
+		kernels_value.signal_changed().connect([=]{
+			p->kernel_sizes.clear();
+			try {
+				p->kernel_sizes = list_expression(kernels_value.get_text());
+				kernels_value.unset_icon(ENTRY_ICON_SECONDARY);
+			} catch(invalid_argument e) {
+				kernels_value.set_icon_from_stock(Stock::DIALOG_ERROR, ENTRY_ICON_SECONDARY);
+			}
+			validate();
 		});
-		constraints_menu.append(*add_constraint->create_menu_item());
-
-		constraints_view.get_selection()->signal_changed().connect([&]{
-			remove_constraint->set_sensitive(constraints_view.get_selection()->get_selected());
-		});
-		remove_constraint->signal_activate().connect([&]{
-			auto it = constraints_view.get_selection()->get_selected();
-			if(it) constraints_model->erase(it);
-		});
-		constraints_menu.append(*remove_constraint->create_menu_item());
-
-		constraints_view.signal_button_press_event().connect_notify([&](GdkEventButton *evt){
-			if(evt->type == GDK_BUTTON_PRESS && evt->button == GDK_BUTTON_SECONDARY)
-				constraints_menu.popup(evt->button, evt->time);
-		});
-
-		auto constraints_scroll = manage(new ScrolledWindow());
-		constraints_scroll->add(constraints_view);
-		left_pane->pack_start(*constraints_scroll);
-		constraints_view.append_column_editable("Kernel", constraints_columns.kernel);
 
 		// Output
 		paned->pack_start(notebook);
@@ -251,20 +229,19 @@ struct main_window : Gtk::ApplicationWindow {
 		});
 	}
 
+	void validate() {
+		bool ok = true;
+		ok &= !p->kernel_sizes.empty();
+		ok &= input_image;
+		run->set_sensitive(ok);
+	}
+
 	// Run the algorithm in a new thread.
 	void do_run() {
-		if(constraints_model->children().size() == 0) {
-			cerr << "no constraints" << endl;
-			return;
-		}
 		progress.show();
 		run->set_sensitive(false);
 		stop->set_sensitive(true);
 		current_log.clear();
-
-		p->kernel_sizes.clear();
-		for(TreeRow r : constraints_model->children())
-			p->kernel_sizes.push_back(r.get_value(constraints_columns.kernel));
 
 		// start thread
 		continue_run = true;
@@ -311,7 +288,7 @@ struct main_window : Gtk::ApplicationWindow {
 		input_image = image;
 		input_image_view.set(input_image);
 		output_image_view.set(input_image);
-		run->set_sensitive(true);
+		validate();
 	}
 
 	void open(string filename) {
