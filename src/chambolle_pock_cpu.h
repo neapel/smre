@@ -75,6 +75,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			random_device dev;
 			mt19937 gen(dev());
 			normal_distribution<T> dist(/*mean*/0, /*stddev*/1);
+			#pragma omp parallel for
 			for(size_t i = 0 ; i < p.monte_carlo_steps ; i++) {
 				for(auto row : data) for(auto &x : row) x = dist(gen);
 				auto f_data = convolution->prepare_image(data);
@@ -82,8 +83,11 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 					convolution->conv(f_data, constraints[j].k, convolved);
 					auto norm_inf = max(abs(convolved));
 					auto k_q = norm_inf - constraints[j].shift_q;
+					#pragma omp critical
 					k_qs[j].push_back(k_q);
 				}
+				#pragma omp critical
+				this->progress(double(i) / p.monte_carlo_steps);
 			}
 		});
 		for(auto &c : constraints)
@@ -130,20 +134,24 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 				// convolve bar_x with kernel
 				A convolved(p.size);
 				convolution->conv(f_bar_x, c.k, convolved);
+				#pragma omp critical
 				this->debug(convolved, "convolved_i");
 				// calculate new y_i
 				convolved *= sigma;
 				c.y += convolved;
 				c.y = mimas::multi_func<T>(c.y,
 					[&](T v){return soft_shrink(v, c.q * sigma);});
+				#pragma omp critical
 				this->debug(c.y, "y_i");
 				// convolve y_i with conjugate transpose of kernel
 				auto f_y = convolution->prepare_image(c.y);
 				convolution->conv(f_y, c.adj_k, convolved);
+				#pragma omp critical
 				this->debug(convolved, "adj_convolved_i");
 				// accumulate
 				#pragma omp critical
 				w += convolved;
+				#pragma omp critical
 				this->debug(w, "accum");
 			}
 			this->progress(double(n) / p.max_steps);

@@ -284,11 +284,7 @@ struct main_window : Gtk::ApplicationWindow {
 			};
 			if(debug_value.get_active())
 				run_p->debug_cb = [=](const boost::multi_array<T,2> &a, string desc) {
-					#pragma omp critical
-					{
-						auto img = multi_array_to_pixbuf(a);
-						current_log.push_back(debug_state{img, desc});
-					}
+					current_log.push_back(debug_state{multi_array_to_pixbuf(a), desc});
 				};
 			auto result = run_p->run(input);
 			force_q_value.set_value(run_p->q);
