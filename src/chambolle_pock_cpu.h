@@ -76,7 +76,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			random_device dev;
 			mt19937 gen(dev());
 			normal_distribution<T> dist(/*mean*/0, /*stddev*/1);
-			#pragma omp parallel for
+			//#pragma omp parallel for
 			for(size_t i = 0 ; i < p.monte_carlo_steps ; i++) {
 				for(auto row : data) for(auto &x : row) x = dist(gen);
 				auto f_data = convolution->prepare_image(data);
@@ -84,7 +84,7 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 					convolution->conv(f_data, constraints[j].k, convolved);
 					auto norm_inf = max(abs(convolved));
 					auto k_q = norm_inf - constraints[j].shift_q;
-					#pragma omp critical
+					//#pragma omp critical
 					k_qs[j].push_back(k_q);
 				}
 				//#pragma omp critical
