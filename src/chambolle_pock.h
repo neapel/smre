@@ -80,7 +80,7 @@ struct impl {
 	T q;
 
 	// current progress [0:1]
-	std::function<void(double)> progress_cb{nullptr};
+	std::function<void(double, std::string desc)> progress_cb{nullptr};
 	// current status. Breaks if true is returned, result is current status.
 	std::function<bool(const boost::multi_array<T, 2> &, size_t step)> current_cb{nullptr};
 	// debug.
@@ -91,8 +91,8 @@ struct impl {
 
 	virtual boost::multi_array<T, 2> run(const boost::multi_array<T,2> &) = 0;
 
-	virtual void progress(double q) {
-		if(progress_cb) progress_cb(q);
+	virtual void progress(double q, std::string d) {
+		if(progress_cb) progress_cb(q, d);
 	}
 
 	virtual bool current(const boost::multi_array<T,2> &a, size_t s) {

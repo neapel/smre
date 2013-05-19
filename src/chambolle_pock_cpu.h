@@ -1,6 +1,7 @@
 #ifndef __CHAMBOLLE_POCK_CPU_H__
 #define __CHAMBOLLE_POCK_CPU_H__
 
+#include <boost/format.hpp>
 
 #include "chambolle_pock.h"
 #include "resolvent.h"
@@ -86,8 +87,8 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 					#pragma omp critical
 					k_qs[j].push_back(k_q);
 				}
-				#pragma omp critical
-				this->progress(double(i) / p.monte_carlo_steps);
+				//#pragma omp critical
+				this->progress(double(i) / p.monte_carlo_steps, "Monte Carlo simulation for q");
 			}
 		});
 		for(auto &c : constraints)
@@ -135,34 +136,34 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 				A convolved(p.size);
 				convolution->conv(f_bar_x, c.k, convolved);
 				#pragma omp critical
-				this->debug(convolved, "convolved_i");
+				this->debug(convolved, str(boost::format("convolved_%d") % i));
 				// calculate new y_i
 				convolved *= sigma;
 				c.y += convolved;
 				c.y = mimas::multi_func<T>(c.y,
 					[&](T v){return soft_shrink(v, c.q * sigma);});
 				#pragma omp critical
-				this->debug(c.y, "y_i");
+				this->debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
 				auto f_y = convolution->prepare_image(c.y);
 				convolution->conv(f_y, c.adj_k, convolved);
 				#pragma omp critical
-				this->debug(convolved, "adj_convolved_i");
+				this->debug(convolved, str(boost::format("adj_convolved_%d") % i));
 				// accumulate
 				#pragma omp critical
 				w += convolved;
 				#pragma omp critical
-				this->debug(w, "accum");
+				this->debug(w, str(boost::format("w_%d") % i));
 			}
-			this->progress(double(n) / p.max_steps);
+			this->progress(double(n) / p.max_steps, str(boost::format("Chambolle-Pock step %d") % n));
 
 			old_x = x;
 			w *= tau;
 			bar_x = x; bar_x -= Y; bar_x -= tau;
-			this->debug(bar_x, "bar_x");
+			this->debug(bar_x, "resolv_in");
 			resolvent->evaluate(tau, bar_x, x);
 			x += Y;
-			this->debug(x, "resolv_x");
+			this->debug(x, "resolv_out");
 			const T theta = 1 / sqrt(1 + 2 * tau * resolvent->gamma);
 			tau *= theta;
 			sigma /= theta;

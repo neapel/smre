@@ -1,6 +1,8 @@
 #ifndef __CHAMBOLLE_POCK_CL_H__
 #define __CHAMBOLLE_POCK_CL_H__
 
+#include <boost/format.hpp>
+
 #include "convolution.h"
 
 #include "chambolle_pock.h"
@@ -77,7 +79,7 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 					auto k_q = norm_inf - constraints[j].shift_q;
 					k_qs[j].push_back(k_q);
 				}
-				this->progress(double(i) / p.monte_carlo_steps);
+				this->progress(double(i) / p.monte_carlo_steps, "Monte Carlo simulation for q");
 			}
 		});
 		for(auto &c : constraints)
@@ -145,26 +147,27 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 				auto c = constraints[i];
 				// convolve bar_x with kernel
 				convolution->conv(f_bar_x, c.k, convolved);
-				debug(convolved, "convolved_i");
+				debug(convolved, str(boost::format("convolved_%d") % i));
 				// calculate new y_i
 				c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma);
-				debug(c.y, "y_i");
+				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
 				auto f_y = convolution->prepare_image(c.y);
 				convolution->conv(f_y, c.adj_k, convolved);
-				debug(convolved, "adj_convolved_i");
+				debug(convolved, str(boost::format("adj_convolved_%d") % i));
 				// accumulate
 				w += convolved;
-				debug(w, "accum");
-				this->progress(double(n * constraints.size() + i) / (p.max_steps * constraints.size()));
+				debug(w, str(boost::format("w_%d") % i));
+				this->progress(double(n * constraints.size() + i) / (p.max_steps * constraints.size()),
+					str(boost::format("Chambolle-Pock step %d") % n));
 			}
 
 			old_x = x;
 			bar_x = x - Y - w*tau;
-			debug(bar_x, "bar_x");
+			debug(bar_x, "resolv_in");
 			resolvent->evaluate(tau, bar_x, x);
 			x += Y;
-			debug(x, "resolv_x");
+			debug(x, "resolv_out");
 			const T theta = 1 / sqrt(1 + 2 * tau * resolvent->gamma);
 			tau *= theta;
 			sigma /= theta;

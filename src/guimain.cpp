@@ -65,7 +65,9 @@ struct main_window : Gtk::ApplicationWindow {
 	};
 	vector<debug_state> current_log, previous_log;
 	RefPtr<Pixbuf> current_output;
+
 	double progress_value;
+	string progress_desc;
 
 	Threads::Thread *current_thread = nullptr;
 	bool continue_run = true;
@@ -209,15 +211,16 @@ struct main_window : Gtk::ApplicationWindow {
 		progress_b->set_expand(true);
 		progress_b->set_sensitive(false);
 		toolbar->append(*progress_b);
+		progress.set_show_text(true);
 
 		constraints_menu.show_all();
+		progress.hide();
 		show_all_children();
 		set_default_size(1000, 800);
 
-		progress.hide();
-
 		update_progress.connect([&]{
 			progress.set_fraction(progress_value);
+			progress.set_text(progress_desc);
 		});
 
 		update_output.connect([&]{
@@ -267,8 +270,9 @@ struct main_window : Gtk::ApplicationWindow {
 			auto input = pixbuf_to_multi_array(input_image);
 			p->set_size(input.shape());
 			auto run_p = p->runner();
-			run_p->progress_cb = [=](double p) {
+			run_p->progress_cb = [=](double p, string d) {
 				progress_value = p;
+				progress_desc = d;
 				update_progress();
 			};
 			run_p->current_cb = [=](const boost::multi_array<T,2> &a, size_t s) {
