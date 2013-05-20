@@ -44,7 +44,7 @@ struct impl;
 template<class T>
 struct params {
 	size_t max_steps = 10, monte_carlo_steps = 1000;
-	T alpha = 0.5, tau = 50, sigma = 1, input_variance = 1, force_q = -1;
+	T alpha = 0.5, tau = 1000, sigma = 0.1, input_variance = 1, force_q = -1;
 	bool no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true, use_gpu = false;
 	sizes_t kernel_sizes;
 	size2_t size;
@@ -95,7 +95,7 @@ struct impl {
 
 protected:
 	T cached_q(std::function<void(std::vector<std::vector<T>>&)> calc) {
-		if(p.force_q > 0) return p.force_q;
+		if(p.force_q >= 0) return p.force_q;
 
 		static const auto cache_dir = "cache/";
 		using namespace std;

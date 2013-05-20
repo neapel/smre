@@ -27,12 +27,12 @@ struct main_window : Gtk::ApplicationWindow {
 	shared_ptr<params<T>> p;
 	RefPtr<Pixbuf> input_image;
 
-	SpinButton alpha_value{Adjustment::create(p->alpha, 0, 1), 0, 2};
-	SpinButton tau_value{Adjustment::create(p->tau, 0, 10000), 0, 0};
-	SpinButton sigma_value{Adjustment::create(p->sigma, 0, 5), 0, 4};
+	SpinButton alpha_value{Adjustment::create(p->alpha, 0, 1, 0.1, 1), 0, 2};
+	SpinButton tau_value{Adjustment::create(p->tau, 0, 10000, 10, 100), 0, 0};
+	SpinButton sigma_value{Adjustment::create(p->sigma, 0, 5, 0.01, 0.1), 0.1, 4};
 	SpinButton max_steps_value{Adjustment::create(p->max_steps, 1, 1000)};
-	SpinButton force_q_value{Adjustment::create(p->force_q, 0, 100), 0, 3};
-	SpinButton mc_steps_value{Adjustment::create(p->monte_carlo_steps, 1, 10000), 0, 0};
+	SpinButton force_q_value{Adjustment::create(p->force_q, 0, 100, 0.01, 0.1), 0, 3};
+	SpinButton mc_steps_value{Adjustment::create(p->monte_carlo_steps, 1, 10000, 10, 100), 0, 0};
 	CheckButton use_gpu_value{"Use OpenCL"};
 	CheckButton use_fft_value{"Use FFT for convolution"};
 	CheckButton resolv_value{"Use H₁ resolvent"};
@@ -343,6 +343,7 @@ struct app_t : Gtk::Application {
 			vex::StaticContext<>::set(*clctx);
 			cerr << "OpenCL: " << *clctx << endl;
 			p->use_gpu = true;
+			p->use_fft = false;
 		} catch(cl::Error &e) {
 			cerr << "OpenCL unavailable: " << e << endl;
 			p->use_gpu = false;
@@ -362,9 +363,9 @@ struct app_t : Gtk::Application {
 			("cpu", value(&p->use_gpu)->implicit_value(false)->zero_tokens(),
 				"Use CPU/FFTW (default: GPU/OpenCL)");
 		main_desc.add_options()("fft", value(&p->use_fft)->implicit_value(true)->zero_tokens(),
-			"Use FFT for convolution (default)");
+			"Use FFT for convolution (default for CPU)");
 		main_desc.add_options()("sat", value(&p->use_fft)->implicit_value(false)->zero_tokens(),
-			"Use SAT for convolution (faster for GPU)");
+			"Use SAT for convolution (default for GPU)");
 		options_description par_desc("Parameters");
 		par_desc.add_options()
 			("constraints,c", value(&p->kernel_sizes)->default_value(p->kernel_sizes)->value_name("<list>"),
