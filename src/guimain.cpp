@@ -6,12 +6,13 @@
 #include <boost/format.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
+#include "constraint_parser.h"
+#include <boost/program_options.hpp>
 #include <cmath>
 #include "config.h"
 #include "multi_array_io.h"
-
 #include "chambolle_pock.h"
-#include "constraint_parser.h"
+
 
 using namespace std;
 using namespace Gtk;

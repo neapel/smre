@@ -65,14 +65,16 @@ std::vector<size_t> list_expression(std::string expr) {
 	return out;
 }
 
+namespace std {
 
-#ifdef BOOST_PROGRAM_OPTIONS_VERSION
-struct sizes_t : std::vector<size_t> {
-	sizes_t() : std::vector<size_t>() {}
-	sizes_t(std::initializer_list<size_t> l) : std::vector<size_t>(l) {}
-	sizes_t(std::vector<size_t> l) : std::vector<size_t>(l) {}
-};
-std::ostream &operator<<(std::ostream &o, const sizes_t &s) {
+std::istream &operator>>(std::istream &i, std::vector<size_t> &s) {
+	std::istream_iterator<char> begin{i}, end;
+	const std::string b(begin, end);
+	s = list_expression(b);
+	return i;
+}
+
+std::ostream &operator<<(std::ostream &o, const std::vector<size_t> &s) {
 	for(size_t i = 0 ; i < s.size() ; i++) {
 		if(i != 0) o << ',';
 		o << s[i];
@@ -80,17 +82,6 @@ std::ostream &operator<<(std::ostream &o, const sizes_t &s) {
 	return o;
 }
 
-void validate(boost::any &v, const std::vector<std::string> &values, sizes_t *, int) {
-	using namespace boost::program_options;
-	//?? validators::check_first_occurence(v);
-	auto str = validators::get_single_string(values);
-	try {
-		auto lst = list_expression(str);
-		v = boost::any(sizes_t(lst));
-	} catch(...) {
-		throw validation_error(validation_error::invalid_option_value);
-	}
 }
-#endif
 
 #endif

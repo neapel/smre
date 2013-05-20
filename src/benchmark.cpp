@@ -54,7 +54,7 @@ void bench(size_t image, size_t kernels) {
 
 int main(int argc, char **argv) {
 	options_description desc("Options");
-	sizes_t sizes{{128}}, kernels{{4}};
+	vector<size_t> sizes{{128}}, kernels{{4}};
 	desc.add_options()
 		("help", "show help")
 		("size", value(&sizes), "list of sizes to try.")

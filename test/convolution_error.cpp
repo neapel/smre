@@ -1,8 +1,8 @@
 /** Check numerical error of convolutions against arbitrary-precision SAT */
 
 #include <boost/multiprecision/mpfr.hpp>
-#include <boost/program_options.hpp>
 #include "constraint_parser.h"
+#include <boost/program_options.hpp>
 #include "convolution.h"
 using namespace boost;
 using namespace boost::multiprecision;
@@ -11,7 +11,7 @@ typedef boost::multiprecision::static_mpfr_float_50 float50;
 //typedef boost::multiprecision::mpfr_float_1000 float50;
 
 template<class C>
-void check(std::string id, std::string name, size2_t size, size_t runs, sizes_t hs) {
+void check(std::string id, std::string name, size2_t size, size_t runs, std::vector<size_t> hs) {
 	multi_array<float50,2> elem_diff(size), elem_ref(size), in(size), ref(size);
 	multi_array<float,2> in_(size), out_(size);
 	std::uniform_real_distribution<float> dist(-0.5, 0.5);
@@ -70,13 +70,13 @@ void check(std::string id, std::string name, size2_t size, size_t runs, sizes_t 
 int main(int argc, char **argv) {
 	using namespace boost::program_options;
 	size_t s, runs;
-	sizes_t hs;
+	std::vector<size_t> hs;
 	std::string sat_gpu_f, sat_cpu_f, fft_gpu_f, fft_cpu_f;
 	options_description desc("Options");
 	desc.add_options()
 		("help", "show help")
 		("size", value(&s)->default_value(128), "image size")
-		("box", value(&hs)->default_value(sizes_t{9}), "box size")
+		("box", value(&hs)->default_value(std::vector<size_t>{9}), "box size")
 		("sat-gpu", value(&sat_gpu_f)->default_value("")->implicit_value("-"), "output filename")
 		("sat-cpu", value(&sat_cpu_f)->default_value("")->implicit_value("-"), "output filename")
 		("fft-gpu", value(&fft_gpu_f)->default_value("")->implicit_value("-"), "output filename")
