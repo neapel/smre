@@ -257,11 +257,10 @@ struct main_window : Gtk::ApplicationWindow {
 		progress_b->set_expand(true);
 		progress_b->set_sensitive(false);
 		toolbar->append(*progress_b);
-		progress.set_show_text(true);
 
 		constraints_menu.show_all();
-		progress.hide();
 		show_all_children();
+		progress.hide();
 		set_default_size(1000, 800);
 
 		update_progress.connect([&]{
