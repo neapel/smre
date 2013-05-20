@@ -59,6 +59,7 @@ struct main_window : Gtk::ApplicationWindow {
 	RefPtr<Action> load_image{Action::create("load_image", Stock::OPEN, "_Load")};
 	RefPtr<Action> run{Action::create("run", Stock::MEDIA_PLAY, "_Run")};
 	RefPtr<Action> stop{Action::create("stop", Stock::MEDIA_STOP, "_Stop")};
+	RefPtr<ToggleAction> auto_run{ToggleAction::create("auto-run", Stock::REFRESH, "Auto Run")};
 
 	struct debug_state {
 		RefPtr<Pixbuf> img;
@@ -71,7 +72,7 @@ struct main_window : Gtk::ApplicationWindow {
 	string progress_desc;
 
 	Threads::Thread *current_thread = nullptr;
-	bool continue_run = true;
+	bool continue_run = true, valid = false, have_run = false;
 
 	Dispatcher update_progress, update_output, algorithm_done;
 
@@ -97,6 +98,9 @@ struct main_window : Gtk::ApplicationWindow {
 		stop->set_sensitive(false);
 		stop->signal_activate().connect([&]{ continue_run = false; });
 		toolbar->append(*stop->create_tool_item());
+
+		auto_run->set_is_important(true);
+		toolbar->append(*auto_run->create_tool_item());
 
 		// Main area
 		auto paned = manage(new HBox());
@@ -140,6 +144,10 @@ struct main_window : Gtk::ApplicationWindow {
 		options->attach(do_force_q_value, 0, row, 1, 1);
 		options->attach(force_q_value, 1, row++, 1, 1);
 
+		auto alpha_label = manage(new Label("α", ALIGN_START));
+		options->attach(*alpha_label, 0, row, 1, 1);
+		options->attach(alpha_value, 1, row++, 1, 1);
+
 		auto mc_steps_label = manage(new Label("MC Steps", ALIGN_START));
 		options->attach(*mc_steps_label, 0, row, 1, 1);
 		options->attach(mc_steps_value, 1, row++, 1, 1);
@@ -152,38 +160,70 @@ struct main_window : Gtk::ApplicationWindow {
 		options->attach(auto_range_value, 0, row++, 2, 1);
 
 		// Connect to model
-		alpha_value.signal_value_changed().connect([=]{ p->alpha = alpha_value.get_value(); });
-		tau_value.signal_value_changed().connect([=]{ p->tau = tau_value.get_value(); });
-		sigma_value.signal_value_changed().connect([=]{ p->sigma = sigma_value.get_value(); });
-		max_steps_value.signal_value_changed().connect([=]{ p->max_steps = max_steps_value.get_value(); });
-		mc_steps_value.signal_value_changed().connect([=]{ p->monte_carlo_steps = mc_steps_value.get_value(); });
+		alpha_value.signal_value_changed().connect([=]{
+			p->alpha = alpha_value.get_value();
+			validate();
+		});
+		tau_value.signal_value_changed().connect([=]{
+			p->tau = tau_value.get_value();
+			validate();
+		});
+		sigma_value.signal_value_changed().connect([=]{
+			p->sigma = sigma_value.get_value();
+			validate();
+		});
+		max_steps_value.signal_value_changed().connect([=]{
+			p->max_steps = max_steps_value.get_value();
+			validate();
+		});
+		mc_steps_value.signal_value_changed().connect([=]{
+			p->monte_carlo_steps = mc_steps_value.get_value();
+			validate();
+		});
 
 		auto q_ = [=]{
 			const bool f = do_force_q_value.get_active();
 			mc_steps_value.set_sensitive(!f);
+			alpha_value.set_sensitive(!f);
 			force_q_value.set_sensitive(f);
 			p->force_q = f ? force_q_value.get_value() : -1;
+			validate();
 		};
 		do_force_q_value.set_active(p->force_q >= 0);
 		do_force_q_value.signal_toggled().connect(q_);
-		force_q_value.signal_value_changed().connect(q_);
 		q_();
+		force_q_value.signal_value_changed().connect([=]{
+			if(do_force_q_value.get_active()) {
+				p->force_q = force_q_value.get_value();
+				validate();
+			}
+		});
 
 		use_gpu_value.set_active(p->use_gpu);
-		use_gpu_value.signal_toggled().connect([=]{ p->use_gpu = use_gpu_value.get_active(); });
+		use_gpu_value.signal_toggled().connect([=]{
+			p->use_gpu = use_gpu_value.get_active();
+			validate();
+		});
 
 		use_fft_value.set_active(p->use_fft);
-		use_fft_value.signal_toggled().connect([=]{ p->use_fft = use_fft_value.get_active(); });
+		use_fft_value.signal_toggled().connect([=]{
+			p->use_fft = use_fft_value.get_active();
+			validate();
+		});
 
 		resolv_value.signal_toggled().connect([=]{
 			if(resolv_value.get_active()) p->resolvent = make_shared<resolvent_h1_params<T>>();
 			else p->resolvent = make_shared<resolvent_l2_params<T>>();
+			validate();
 		});
 
 		penalized_scan_value.set_active(p->penalized_scan);
-		penalized_scan_value.signal_toggled().connect([=]{ p->penalized_scan = penalized_scan_value.get_active(); });
+		penalized_scan_value.signal_toggled().connect([=]{
+			p->penalized_scan = penalized_scan_value.get_active();
+			validate();
+		});
 
-		kernels_value.signal_changed().connect([=]{
+		auto k_ = [=]{
 			p->kernel_sizes.clear();
 			try {
 				p->kernel_sizes = sizes_t(kernels_value.get_text());
@@ -192,7 +232,9 @@ struct main_window : Gtk::ApplicationWindow {
 				kernels_value.set_icon_from_stock(Stock::DIALOG_ERROR, ENTRY_ICON_SECONDARY);
 			}
 			validate();
-		});
+		};
+		kernels_value.signal_changed().connect(k_);
+		k_();
 
 		// Output
 		paned->pack_start(notebook);
@@ -234,7 +276,6 @@ struct main_window : Gtk::ApplicationWindow {
 
 		algorithm_done.connect([&]{
 			if(current_thread) current_thread->join();
-			current_thread = nullptr;
 			if(debug_value.get_active()) {
 				steps_model->clear();
 				for(size_t i = 0 ; i < current_log.size() ; i++) {
@@ -248,20 +289,26 @@ struct main_window : Gtk::ApplicationWindow {
 				notebook.set_current_page(2);
 			}
 			progress.hide();
-			run->set_sensitive(true);
+			run->set_sensitive(valid);
 			stop->set_sensitive(false);
+			current_thread = nullptr;
+			if(!have_run) validate();
 		});
 	}
 
 	void validate() {
-		bool ok = true;
-		ok &= !p->kernel_sizes.empty();
-		ok &= input_image;
-		run->set_sensitive(ok);
+		have_run = false;
+		valid = true;
+		valid &= !p->kernel_sizes.empty();
+		valid &= input_image;
+		run->set_sensitive(valid);
+		if(valid && auto_run->get_active() && !current_thread)
+			do_run();
 	}
 
 	// Run the algorithm in a new thread.
 	void do_run() {
+		have_run = true;
 		progress.show();
 		run->set_sensitive(false);
 		stop->set_sensitive(true);
