@@ -14,6 +14,7 @@
 #include <boost/filesystem.hpp>
 
 #include "resolvent.h"
+#include "constraint_parser.h"
 
 
 /**
@@ -45,7 +46,7 @@ struct params {
 	size_t max_steps = 10, monte_carlo_steps = 1000;
 	T alpha = 0.5, tau = 50, sigma = 1, input_variance = 1, force_q = -1;
 	bool no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true, use_gpu = false;
-	std::vector<size_t> kernel_sizes;
+	sizes_t kernel_sizes;
 	size2_t size;
 	std::shared_ptr<resolvent_params<T>> resolvent = std::make_shared<resolvent_l2_params<T>>();
 

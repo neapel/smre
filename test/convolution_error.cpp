@@ -70,13 +70,13 @@ void check(std::string id, std::string name, size2_t size, size_t runs, std::vec
 int main(int argc, char **argv) {
 	using namespace boost::program_options;
 	size_t s, runs;
-	std::vector<size_t> hs;
+	sizes_t hs{9};
 	std::string sat_gpu_f, sat_cpu_f, fft_gpu_f, fft_cpu_f;
 	options_description desc("Options");
 	desc.add_options()
 		("help", "show help")
 		("size", value(&s)->default_value(128), "image size")
-		("box", value(&hs)->default_value(std::vector<size_t>{9}), "box size")
+		("box", value(&hs)->default_value(hs), "box size")
 		("sat-gpu", value(&sat_gpu_f)->default_value("")->implicit_value("-"), "output filename")
 		("sat-cpu", value(&sat_cpu_f)->default_value("")->implicit_value("-"), "output filename")
 		("fft-gpu", value(&fft_gpu_f)->default_value("")->implicit_value("-"), "output filename")

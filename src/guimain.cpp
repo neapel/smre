@@ -117,7 +117,8 @@ struct main_window : Gtk::ApplicationWindow {
 		auto kernels_label = manage(new Label("Kernel sizes (h)", ALIGN_START));
 		options->attach(*kernels_label, 0, row, 1, 1);
 		kernels_value.set_placeholder_text("1,3,...,10; 50..55");
-		kernels_value.set_text("2,4,...,50");
+		if(p->kernel_sizes.empty()) kernels_value.set_text("2,4,...,50");
+		else kernels_value.set_text(p->kernel_sizes.expr);
 		options->attach(kernels_value, 1, row++, 1, 1);
 
 		options->attach(use_fft_value, 0, row++, 2, 1);
@@ -185,7 +186,7 @@ struct main_window : Gtk::ApplicationWindow {
 		kernels_value.signal_changed().connect([=]{
 			p->kernel_sizes.clear();
 			try {
-				p->kernel_sizes = list_expression(kernels_value.get_text());
+				p->kernel_sizes = sizes_t(kernels_value.get_text());
 				kernels_value.unset_icon(ENTRY_ICON_SECONDARY);
 			} catch(invalid_argument e) {
 				kernels_value.set_icon_from_stock(Stock::DIALOG_ERROR, ENTRY_ICON_SECONDARY);

@@ -89,7 +89,7 @@ void bench_gpu_lin(size_t sz) {
 
 int main(int argc, char **argv) {
 	options_description desc("Options");
-	vector<size_t> sizes{{128}}, hs{{4}};
+	sizes_t sizes{128}, hs{4};
 	bool run_gpu = true, run_cpu = true, run_fft = true, run_sat = true;
 	desc.add_options()
 		("help", "show help")
