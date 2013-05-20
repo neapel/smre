@@ -75,7 +75,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 	Dispatcher update_progress, update_output, algorithm_done;
 
-	main_window(shared_ptr<params<T>> p) : p(p) {
+	main_window(shared_ptr<params<T>> p, bool debug = false) : p(p) {
 		// Main layout
 		auto vbox = manage(new VBox());
 		add(*vbox);
@@ -145,7 +145,9 @@ struct main_window : Gtk::ApplicationWindow {
 
 		options->attach(penalized_scan_value, 0, row++, 2, 1);
 
+		debug_value.set_active(debug);
 		options->attach(debug_value, 0, row++, 2, 1);
+
 		options->attach(auto_range_value, 0, row++, 2, 1);
 
 		// Connect to model
@@ -321,128 +323,123 @@ struct main_window : Gtk::ApplicationWindow {
 
 
 using namespace Gio;
-
-OptionEntry entry(string name, string desc) {
-	OptionEntry e;
-	e.set_long_name(name);
-	e.set_description(desc);
-	return e;
-}
+using namespace boost::program_options;
 
 struct app_t : Gtk::Application {
-	RefPtr<Pixbuf> input_image;
+	bool debug = false;
+	string input_file;
 	shared_ptr<main_window> main;
 
 	shared_ptr<params<T>> p = make_shared<params<T>>();
 	shared_ptr<vex::Context> clctx;
 
 	app_t()
-	: Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_HANDLES_OPEN | APPLICATION_NON_UNIQUE),
-	  input_image() {}
-
-	bool parse_constraint(const ustring &, const ustring &value, bool has_value) {
-		if(!has_value) return false;
-		auto c = list_expression(value);
-		copy(c.begin(), c.end(), back_inserter(p->kernel_sizes));
-		return true;
-	}
-
-	bool parse_impl(const ustring &, const ustring &value, bool has_value) {
-		if(!has_value) return false;
-		if(value == "gpu") p->implementation = GPU_IMPL;
-		else if(value == "cpu") p->implementation = CPU_IMPL;
-		else return false;
-		return true;	
-	}
-
-	bool parse_resolvent(const ustring &, const ustring &value, bool has_value) {
-		if(!has_value) return false;
-		if(value == "l2") p->resolvent = make_shared<resolvent_l2_params<T>>();
-		else if(value == "h1") p->resolvent = make_shared<resolvent_h1_params<T>>();
-		else return false;
-		return true;
-	}
+	: Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_NON_UNIQUE) {}
 
 	int on_command_line(const RefPtr<ApplicationCommandLine> &cmd) {
-		// define arguments
-		OptionContext ctx("[FILE]");
-		OptionGroup group("params", "default parameters", "longer");
-
-		double alpha = p->alpha, tau = p->tau, sigma = p->sigma, force_q = p->force_q;
-		int max_steps = p->max_steps, monte_carlo_steps = p->monte_carlo_steps;
-		bool use_fft = p->use_fft;
-		group.add_entry(entry("alpha", "initial value for alpha"), alpha);
-		group.add_entry(entry("tau", "initial value for tau"), tau);
-		group.add_entry(entry("sigma", "initial value for sigma"), sigma);
-		group.add_entry(entry("q", "don't calculate/cache q, use direct value"), force_q);
-		group.add_entry(entry("steps", "number of iteration steps"), max_steps);
-		group.add_entry(entry("impl", "'gpu' for OpenCL or 'cpu' for OpenMP."), mem_fun(*this, &app_t::parse_impl));
-		group.add_entry(entry("mc-steps", "number of Monte Carlo steps"), monte_carlo_steps);
-		group.add_entry(entry("no-cache", "don't use the monte carlo cache"), p->no_cache);
-		group.add_entry(entry("penalized-scan", "use penalized scan statistic"), p->penalized_scan);
-		group.add_entry(entry("mc-dump", "dump mc data for each kernel"), p->dump_mc);
-		//group.add_entry(entry("debug", "enable debug output"), p->debug);
-		group.add_entry(entry("constraint", "kernel sizes, comma separated list or '<start>,<next>,...,<end>'"), mem_fun(*this, &app_t::parse_constraint));
-		group.add_entry(entry("resolvent", "'l2' or 'h1'"), mem_fun(*this, &app_t::parse_resolvent));
-		group.add_entry(entry("use-fft", "use FFT for convolution (or SAT)"), use_fft);
+		try {
+			clctx = make_shared<vex::Context>(vex::Filter::Count(1));
+			vex::StaticContext<>::set(*clctx);
+			cerr << "OpenCL: " << *clctx << endl;
+			p->use_gpu = true;
+		} catch(cl::Error &e) {
+			cerr << "OpenCL unavailable: " << e << endl;
+			p->use_gpu = false;
+		}
 
 		string output_file;
-		group.add_entry_filename(entry("output", "save output PNG here (runs without GUI)."), output_file);
 
-		ctx.set_main_group(group);
+		options_description main_desc("Options");
+		main_desc.add_options()
+			("help,h", "show this help")
+			("debug,d", bool_switch(&debug), "dump intermediate steps")
+			("input,i", value(&input_file)->value_name("<file>"),
+				"input image file (png,jpeg,…)")
+			("output,o", value(&output_file)->value_name("<file>"),
+				"output image file (png) → disables GUI");
+		if(p->use_gpu) main_desc.add_options()
+			("cpu", value(&p->use_gpu)->implicit_value(false)->zero_tokens(),
+				"Use CPU/FFTW (default: GPU/OpenCL)");
+		main_desc.add_options()("fft", value(&p->use_fft)->implicit_value(true)->zero_tokens(),
+			"Use FFT for convolution (default)");
+		main_desc.add_options()("sat", value(&p->use_fft)->implicit_value(false)->zero_tokens(),
+			"Use SAT for convolution (faster for GPU)");
+		options_description par_desc("Parameters");
+		par_desc.add_options()
+			("constraints,c", value(&p->kernel_sizes)->default_value(p->kernel_sizes)->value_name("<list>"),
+				"List of kernel sizes, i.e. “1,7,4; 1,3,...,21; 2^2..8; 9” is a valid list")
+			("resolvent,r", value(&p->resolvent)->default_value(p->resolvent)->value_name("<res>"),
+				"Resolvent function to use, either “L2” for L₂ or “H1 <delta>” for H₁")
+			("max-steps,#", value(&p->max_steps)->default_value(p->max_steps)->value_name("<int>"),
+				"Maximum number of optimization steps")
+			("tau,t", value(&p->tau)->default_value(p->tau)->value_name("<float>"),
+				"Step size τ (large)")
+			("sigma,s", value(&p->sigma)->default_value(p->sigma)->value_name("<float>"),
+				"Step size σ (small)")
+			("variance,v", value(&p->input_variance)->default_value(p->input_variance)->value_name("<float>"),
+				"Set the input image variance explicitly instead of guessing it"); // TODO
 
-		// parse them
-		OptionGroup gtkgroup(gtk_get_option_group(true));
-		ctx.add_group(gtkgroup);
+		options_description q_desc("Threshold (q)");
+		q_desc.add_options()
+			("penalized-scan,p", bool_switch(&p->penalized_scan)->default_value(false),
+				"Use penalized scan statistics")
+			(",q", value(&p->force_q)->value_name("<float>"),
+				"Set the threshold q to an explicit value instead of simulating it")
+			("alpha,a", value(&p->alpha)->default_value(p->alpha)->value_name("<float>"),
+				"Quantile α of q's distribution from simulation")
+			("no-cache", bool_switch(&p->no_cache),
+				"Don't use a cached value for q")
+			("mc-steps", value(&p->monte_carlo_steps)->default_value(p->monte_carlo_steps)->value_name("<int>"),
+				"Number of monte carlo simulations to use for q")
+			("dump-mc", bool_switch(&p->dump_mc),
+				"Dump all simulation data");
+
+		options_description desc;
+		desc.add(main_desc).add(par_desc).add(q_desc);
 		int argc;
 		char **argv = cmd->get_arguments(argc);
-		ctx.parse(argc, argv);
-		p->alpha = alpha;
-		p->tau = tau;
-		p->sigma = sigma;
-		p->force_q = force_q;
-		p->max_steps = max_steps;
-		p->monte_carlo_steps = monte_carlo_steps;
-		p->use_fft = use_fft;
-
-		// remaining arguments: filenames. open them.
-		vector<RefPtr<File>> files;
-		for(auto i = 1 ; i < argc ; i++)
-			files.push_back(File::create_for_commandline_arg(argv[i]));
-		if(!files.empty()) open(files);
-
-		// init OpenCL
-		clctx = make_shared<vex::Context>(vex::Filter::Count(1));
-		vex::StaticContext<>::set(*clctx);
-		cerr << "CL context:" << *clctx << endl;
-
-		// run.
-		if(output_file.empty())
-			activate(); // show the gui.
-		else if(input_image) {
-			// CLI mode.
-			auto input = pixbuf_to_multi_array(input_image);
-			p->set_size(input.shape());
-			auto run_p = p->runner();
-			auto output = run_p->run(input);
-			multi_array_to_pixbuf(output)->save(output_file, "png");
-		} else {
-			cmd->printerr("When using --output, you must specify an input image, too.");
+		variables_map vm;
+		store(parse_command_line(argc, argv, desc), vm);
+		notify(vm);
+		if(vm.count("help")) {
+			cerr << desc << endl;
 			return EXIT_FAILURE;
 		}
+
+		// GUI
+		if(output_file.empty()) {
+			activate();
+			return EXIT_SUCCESS;
+		}
+
+		// CLI
+		if(input_file.empty()) {
+			cerr << "--input required for --output." << endl;
+			return EXIT_FAILURE;
+		}
+
+		auto input = pixbuf_to_multi_array(Pixbuf::create_from_file(input_file));
+		p->set_size(input.shape());
+		auto run_p = p->runner();
+		run_p->progress_cb = [](double p, string d) {
+			cerr << " " << int(p * 100) << "% " << d << "\r" << flush;
+		};
+		if(debug) {
+			size_t i = 0;
+			run_p->debug_cb = [&](const boost::multi_array<T,2> &a, string desc) {
+				multi_array_to_pixbuf(a)->save(str(boost::format("%s.%d.%s.png") % output_file % (i++) % desc), "png");
+			};
+		}
+		auto output = run_p->run(input);
+		multi_array_to_pixbuf(output)->save(output_file, "png");
 
 		return EXIT_SUCCESS;
 	}
 
-	void on_open(const vector<RefPtr<File>> &files, const ustring &) {
-		if(files.size() != 1) throw runtime_error("can only open one file.");
-		input_image = Pixbuf::create_from_stream(files[0]->read());
-	}
-
 	void on_activate() {
-		main = make_shared<main_window>(p);
+		main = make_shared<main_window>(p, debug);
 		add_window(*main);
-		if(input_image) main->open(input_image);
+		if(!input_file.empty()) main->open(input_file);
 		main->show();
 	}
 };

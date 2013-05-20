@@ -232,13 +232,40 @@ struct resolvent_h1_gpu : public resolvent_gpu<T> {
 };
 
 template<class T>
-resolvent_impl<CPU_IMPL, T> *resolvent_h1_params<T>::cpu_runner(size2_t size) const {
-	return new resolvent_h1<CPU_IMPL, T>(*this, size);
+std::shared_ptr<resolvent_cpu<T>> resolvent_h1_params<T>::cpu_runner(size2_t size) const {
+	return std::make_shared<resolvent_h1_cpu<T>>(*this, size);
 }
 
 template<class T>
-resolvent_impl<GPU_IMPL, T> *resolvent_h1_params<T>::gpu_runner(size2_t size) const {
-		return new resolvent_h1<GPU_IMPL, T>(*this, size);
+std::shared_ptr<resolvent_gpu<T>> resolvent_h1_params<T>::gpu_runner(size2_t size) const {
+	return std::make_shared<resolvent_h1_gpu<T>>(*this, size);
+}
+
+
+
+
+// parse
+template<class T>
+std::ostream &operator<<(std::ostream &o, const std::shared_ptr<resolvent_params<T>> &p) {
+	return o << p->desc();
+}
+template<class T>
+std::istream &operator>>(std::istream &i, std::shared_ptr<resolvent_params<T>> &p) {
+	std::string tp; i >> tp;
+	if(tp == "L2" || tp == "l2") {
+		p = std::make_shared<resolvent_l2_params<T>>();
+		return i;
+	} else if(tp == "H1" || tp == "h1") {
+		T parm;
+		if(i >> parm) {
+			p = std::make_shared<resolvent_h1_params<T>>(parm);
+			return i;
+		} else {
+			p = std::make_shared<resolvent_h1_params<T>>();
+			return i;
+		}
+	}
+	throw std::invalid_argument("Use `L2` or `H1` or `H1 <delta>`.");
 }
 
 #endif
