@@ -32,7 +32,7 @@ struct main_window : Gtk::ApplicationWindow {
 	SpinButton max_steps_value{Adjustment::create(p->max_steps, 1, 1000)};
 	SpinButton force_q_value{Adjustment::create(p->force_q, 0, 100), 0, 3};
 	SpinButton mc_steps_value{Adjustment::create(p->monte_carlo_steps, 1, 10000), 0, 0};
-	CheckButton impl_value{"Use OpenCL"};
+	CheckButton use_gpu_value{"Use OpenCL"};
 	CheckButton use_fft_value{"Use FFT for convolution"};
 	CheckButton resolv_value{"Use H₁ resolvent"};
 	CheckButton penalized_scan_value{"Use penalized scan"};
@@ -111,7 +111,7 @@ struct main_window : Gtk::ApplicationWindow {
 		options->set_row_spacing(5);
 		int row = 0;
 
-		options->attach(impl_value, 0, row++, 2, 1);
+		options->attach(use_gpu_value, 0, row++, 2, 1);
 
 		auto kernels_label = manage(new Label("Kernel sizes (h)", ALIGN_START));
 		options->attach(*kernels_label, 0, row, 1, 1);
@@ -165,8 +165,8 @@ struct main_window : Gtk::ApplicationWindow {
 		force_q_value.signal_value_changed().connect(q_);
 		q_();
 
-		impl_value.set_active(p->implementation == GPU_IMPL);
-		impl_value.signal_toggled().connect([=]{ p->implementation = impl_value.get_active() ? GPU_IMPL : CPU_IMPL; });
+		use_gpu_value.set_active(p->use_gpu);
+		use_gpu_value.signal_toggled().connect([=]{ p->use_gpu = use_gpu_value.get_active(); });
 
 		use_fft_value.set_active(p->use_fft);
 		use_fft_value.signal_toggled().connect([=]{ p->use_fft = use_fft_value.get_active(); });

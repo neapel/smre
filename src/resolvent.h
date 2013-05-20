@@ -9,32 +9,29 @@
 #include <vexcl/vexcl.hpp>
 #include "multi_array_operators.h"
 
-template<impl_t I, class T>
-struct resolvent_impl;
-
-template<class T>
-struct resolvent_impl<CPU_IMPL, T> {
+template<class A, class T>
+struct resolvent {
 	const T gamma;
-	resolvent_impl(T gamma) : gamma(gamma) {}
-	virtual ~resolvent_impl() {}
-
-	virtual void evaluate(T tau, const boost::multi_array<T, 2> &in, boost::multi_array<T, 2> &out) = 0;
+	resolvent(T gamma) : gamma(gamma) {}
+	virtual ~resolvent() {}
+	virtual void evaluate(T tau, const A &in, A &out) = 0;
 };
 
 template<class T>
-struct resolvent_impl<GPU_IMPL, T> {
-	const T gamma;
-	resolvent_impl(T gamma) : gamma(gamma) {}
-	virtual ~resolvent_impl() {}
+struct resolvent_cpu : resolvent<boost::multi_array<T,2>, T> {
+	resolvent_cpu(T gamma) : resolvent<boost::multi_array<T,2>, T>(gamma) {}
+};
 
-	virtual void evaluate(T tau, const vex::vector<T> &in, vex::vector<T> &out) = 0;
+template<class T>
+struct resolvent_gpu : resolvent<vex::vector<T>, T> {
+	resolvent_gpu(T gamma) : resolvent<vex::vector<T>, T>(gamma) {}
 };
 
 template<class T>
 struct resolvent_params {
-	// TODO: `template<impl_t> virtual` is forbidden...
-	virtual resolvent_impl<CPU_IMPL, T> *cpu_runner(size2_t) const = 0;
-	virtual resolvent_impl<GPU_IMPL, T> *gpu_runner(size2_t) const = 0;
+	virtual std::shared_ptr<resolvent_cpu<T>> cpu_runner(size2_t) const = 0;
+	virtual std::shared_ptr<resolvent_gpu<T>> gpu_runner(size2_t) const = 0;
+	virtual std::string desc() const = 0;
 };
 
 
@@ -55,12 +52,9 @@ struct resolvent_params {
  * This amount to the simple shrinkage \f$ u/(1+\tau) \f$. Classes derived from this basic
  * resolvent class, have to implement the evaluation of the resolvent.
  */
-template<impl_t I, class T>
-struct resolvent_l2 : public resolvent_impl<I, T> {};
-
 template<class T>
-struct resolvent_l2<CPU_IMPL, T> : public resolvent_impl<CPU_IMPL, T> {
-	resolvent_l2() : resolvent_impl<CPU_IMPL, T>(1) {}
+struct resolvent_l2_cpu : public resolvent_cpu<T> {
+	resolvent_l2_cpu() : resolvent_cpu<T>(1) {}
 
 	virtual void evaluate(T tau, const boost::multi_array<T, 2> &in, boost::multi_array<T, 2> &out) {
 		using namespace mimas;
@@ -70,8 +64,8 @@ struct resolvent_l2<CPU_IMPL, T> : public resolvent_impl<CPU_IMPL, T> {
 };
 
 template<class T>
-struct resolvent_l2<GPU_IMPL, T> : public resolvent_impl<GPU_IMPL, T> {
-	resolvent_l2() : resolvent_impl<GPU_IMPL, T>(1) {}
+struct resolvent_l2_gpu : public resolvent_gpu<T> {
+	resolvent_l2_gpu() : resolvent_gpu<T>(1) {}
 
 	virtual void evaluate(T tau, const vex::vector<T> &in, vex::vector<T> &out) {
 		out = in / (1 + tau);
@@ -80,11 +74,14 @@ struct resolvent_l2<GPU_IMPL, T> : public resolvent_impl<GPU_IMPL, T> {
 
 template<class T>
 struct resolvent_l2_params : public resolvent_params<T> {
-	virtual resolvent_impl<CPU_IMPL, T> *cpu_runner(size2_t) const {
-		return new resolvent_l2<CPU_IMPL, T>();
+	virtual std::shared_ptr<resolvent_cpu<T>> cpu_runner(size2_t) const {
+		return std::make_shared<resolvent_l2_cpu<T>>();
 	}
-	virtual resolvent_impl<GPU_IMPL, T> *gpu_runner(size2_t) const {
-		return new resolvent_l2<GPU_IMPL, T>();
+	virtual std::shared_ptr<resolvent_gpu<T>> gpu_runner(size2_t) const {
+		return std::make_shared<resolvent_l2_gpu<T>>();
+	}
+	virtual std::string desc() const {
+		return "L2";
 	}
 };
 
@@ -123,16 +120,13 @@ boost::multi_array<T, 2> laplacian(size2_t size) {
 	return out;
 }
 
-template<impl_t, class T>
-struct helmholtz {};
-
 template<class T>
-struct helmholtz<CPU_IMPL, T> {
+struct helmholtz_cpu {
 	// discrete cosine transform of the laplacian
 	boost::multi_array<T, 2> laplace_dct, temp;
 	fftw::plan<T, T, 2> dct, idct;
 
-	helmholtz(size2_t size)
+	helmholtz_cpu(size2_t size)
 	: laplace_dct(laplacian<T>(size)), temp(size),
 	  dct(size, fftw::forward), idct(size, fftw::inverse) {}
 
@@ -148,12 +142,12 @@ struct helmholtz<CPU_IMPL, T> {
 };
 
 template<class T>
-struct helmholtz<GPU_IMPL, T> {
+struct helmholtz_gpu {
 	// discrete cosine transform of the laplacian
 	boost::multi_array<T, 2> laplace_dct, temp, temp2;
 	fftw::plan<T, T, 2> dct, idct;
 
-	helmholtz(size2_t size)
+	helmholtz_gpu(size2_t size)
 	: laplace_dct(laplacian<T>(size)), temp(size), temp2(size),
 	  dct(size, fftw::forward), idct(size, fftw::inverse) {}
 
@@ -197,19 +191,22 @@ template<class T>
 struct resolvent_h1_params : public resolvent_params<T> {
 	const T delta;
 	resolvent_h1_params(T delta = 0.5) : delta(delta) {}
-	virtual resolvent_impl<CPU_IMPL, T> *cpu_runner(size2_t) const;
-	virtual resolvent_impl<GPU_IMPL, T> *gpu_runner(size2_t) const;
+	virtual std::shared_ptr<resolvent_cpu<T>> cpu_runner(size2_t) const;
+	virtual std::shared_ptr<resolvent_gpu<T>> gpu_runner(size2_t) const;
+
+	virtual std::string desc() const {
+		std::ostringstream s;
+		s << "H1 " << delta;
+		return s.str();
+	}
 };
 
-template<impl_t I, class T>
-struct resolvent_h1 : public resolvent_impl<I, T> {};
-
 template<class T>
-struct resolvent_h1<CPU_IMPL, T> : public resolvent_impl<CPU_IMPL, T> {
+struct resolvent_h1_cpu : public resolvent_cpu<T> {
 	const resolvent_h1_params<T> p;
-	helmholtz<CPU_IMPL, T> h;
-	resolvent_h1(resolvent_h1_params<T> p, size2_t size)
-	: resolvent_impl<CPU_IMPL, T>(1 - p.delta), p(p), h(size) {}
+	helmholtz_cpu<T> h;
+	resolvent_h1_cpu(resolvent_h1_params<T> p, size2_t size)
+	: resolvent_cpu<T>(1 - p.delta), p(p), h(size) {}
 
 	virtual void evaluate(T tau, const boost::multi_array<T, 2> &in, boost::multi_array<T, 2> &out) {
 		using namespace mimas;
@@ -221,11 +218,11 @@ struct resolvent_h1<CPU_IMPL, T> : public resolvent_impl<CPU_IMPL, T> {
 };
 
 template<class T>
-struct resolvent_h1<GPU_IMPL, T> : public resolvent_impl<GPU_IMPL, T> {
+struct resolvent_h1_gpu : public resolvent_gpu<T> {
 	const resolvent_h1_params<T> p;
-	helmholtz<GPU_IMPL, T> h;
-	resolvent_h1(resolvent_h1_params<T> p, size2_t size)
-	: resolvent_impl<GPU_IMPL, T>(1 - p.delta), p(p), h(size) {}
+	helmholtz_gpu<T> h;
+	resolvent_h1_gpu(resolvent_h1_params<T> p, size2_t size)
+	: resolvent_gpu<T>(1 - p.delta), p(p), h(size) {}
 
 	virtual void evaluate(T tau, const vex::vector<T> &in, vex::vector<T> &out) {
 		const T alpha = (1 + tau * (1 - p.delta)) / (tau * p.delta);

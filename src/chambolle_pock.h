@@ -13,17 +13,6 @@
 
 #include <boost/filesystem.hpp>
 
-
-
-
-
-
-// Implementation type.
-enum impl_t {
-	CPU_IMPL, GPU_IMPL
-};
-
-
 #include "resolvent.h"
 
 
@@ -55,8 +44,7 @@ template<class T>
 struct params {
 	size_t max_steps = 10, monte_carlo_steps = 1000;
 	T alpha = 0.5, tau = 50, sigma = 1, input_variance = 1, force_q = -1;
-	bool no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true;
-	impl_t implementation = CPU_IMPL;
+	bool no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true, use_gpu = false;
 	std::vector<size_t> kernel_sizes;
 	size2_t size;
 	std::shared_ptr<resolvent_params<T>> resolvent = std::make_shared<resolvent_l2_params<T>>();
@@ -157,11 +145,6 @@ protected:
 
 };
 
-template<impl_t, class T>
-struct chambolle_pock : impl<T> {};
-
-
-
 #include "chambolle_pock_cpu.h"
 #include "chambolle_pock_cl.h"
 
@@ -174,11 +157,8 @@ std::shared_ptr<impl<T>> params<T>::runner() const {
 	for(auto k : kernel_sizes)
 		if(k < 1 || k > min_sz) throw std::invalid_argument("invalid kernel size");
 	// ok.
-	switch(implementation) {
-		case CPU_IMPL: return std::make_shared<chambolle_pock<CPU_IMPL, T>>(*this);
-		case GPU_IMPL: return std::make_shared<chambolle_pock<GPU_IMPL, T>>(*this);
-		default: throw std::runtime_error("Unsupported implementation");
-	}
+	if(use_gpu) return std::make_shared<chambolle_pock_gpu<T>>(*this);
+	else return std::make_shared<chambolle_pock_cpu<T>>(*this);
 }
 
 #endif

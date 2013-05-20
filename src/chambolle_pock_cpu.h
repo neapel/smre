@@ -15,7 +15,7 @@
 
 
 template<class T>
-struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
+struct chambolle_pock_cpu : public impl<T> {
 	typedef boost::multi_array<T, 2> A;
 
 	using impl<T>::p;
@@ -42,15 +42,15 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 
 	T total_norm;
 	std::vector<constraint> constraints;
-	std::unique_ptr<resolvent_impl<CPU_IMPL, T>> resolvent;
-	std::unique_ptr<convolver<A>> convolution;
+	std::shared_ptr<resolvent_cpu<T>> resolv;
+	std::shared_ptr<cpu_convolver<T>> convolution;
 	bool initialized = false;
 
-	chambolle_pock(const params<T> &p)
+	chambolle_pock_cpu(const params<T> &p)
 	: impl<T>(p),
-	  resolvent(p.resolvent->cpu_runner(p.size)) {
-		if(p.use_fft) convolution.reset(new cpu_fft_convolver<T>(p.size));
-		else convolution.reset(new cpu_sat_convolver<T>(p.size));
+	  resolv(p.resolvent->cpu_runner(p.size)) {
+		if(p.use_fft) convolution = std::make_shared<cpu_fft_convolver<T>>(p.size);
+		else convolution = std::make_shared<cpu_sat_convolver<T>>(p.size);
 	}
 
 	void update_kernels() {
@@ -161,10 +161,10 @@ struct chambolle_pock<CPU_IMPL, T> : public impl<T> {
 			w *= tau;
 			bar_x = x; bar_x -= Y; bar_x -= tau;
 			this->debug(bar_x, "resolv_in");
-			resolvent->evaluate(tau, bar_x, x);
+			resolv->evaluate(tau, bar_x, x);
 			x += Y;
 			this->debug(x, "resolv_out");
-			const T theta = 1 / sqrt(1 + 2 * tau * resolvent->gamma);
+			const T theta = 1 / sqrt(1 + 2 * tau * resolv->gamma);
 			tau *= theta;
 			sigma /= theta;
 			bar_x = x;

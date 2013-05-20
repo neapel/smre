@@ -13,11 +13,11 @@ static bool run_cpu = true, run_gpu = true;
 static size_t runs = 10;
 
 
-template<impl_t impl, class T>
+template<template<class> class impl, class T>
 void run(params<T> a, multi_array<T, 2> in) {
 	watch w;
 	try {
-		chambolle_pock<impl, T> c(a);
+		impl<T> c(a);
 		c.run(in);
 		for(size_t i = 0 ; i < runs ; i++) {
 			w.start();
@@ -42,11 +42,11 @@ void bench(size_t image, size_t kernels) {
 	multi_array<T, 2> in(extents[image][image]);
 	mimas::fill(in, 1);
 	cout << image << '\t' << kernels;
-	if(run_cpu) run<CPU_IMPL>(p, in);
+	if(run_cpu) run<chambolle_pock_cpu>(p, in);
 	if(run_gpu) {
-		run<GPU_IMPL>(p, in);
+		run<chambolle_pock_gpu>(p, in);
 		p.use_fft = false;
-		run<GPU_IMPL>(p, in);
+		run<chambolle_pock_gpu>(p, in);
 	}
 	cout << endl;
 }

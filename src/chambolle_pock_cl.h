@@ -9,7 +9,7 @@
 #include <vexcl/random.hpp>
 
 template<class T>
-struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
+struct chambolle_pock_gpu : public impl<T> {
 	typedef vex::vector<T> A;
 
 	using impl<T>::p;
@@ -35,16 +35,16 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 	const size_t size_1d;
 	T total_norm;
 	std::vector<constraint> constraints;
-	std::unique_ptr<resolvent_impl<GPU_IMPL, T>> resolvent;
-	std::unique_ptr<convolver<A>> convolution;
+	std::shared_ptr<resolvent_gpu<T>> resolv;
+	std::shared_ptr<gpu_convolver<T>> convolution;
 	bool initialized = false;
 
-	chambolle_pock(const params<T> &p)
+	chambolle_pock_gpu(const params<T> &p)
 	: impl<T>(p),
 	  size_1d(p.size[0] * p.size[1]),
-	  resolvent(p.resolvent->gpu_runner(p.size)) {
-		if(p.use_fft) convolution.reset(new gpu_fft_convolver<T>(p.size));
-		else convolution.reset(new gpu_sat_convolver<T>(p.size));
+	  resolv(p.resolvent->gpu_runner(p.size)) {
+		if(p.use_fft) convolution = std::make_shared<gpu_fft_convolver<T>>(p.size);
+		else convolution = std::make_shared<gpu_sat_convolver<T>>(p.size);
 	}
 
 	void update_kernels() {
@@ -165,10 +165,10 @@ struct chambolle_pock<GPU_IMPL, T> : public impl<T> {
 			old_x = x;
 			bar_x = x - Y - w*tau;
 			debug(bar_x, "resolv_in");
-			resolvent->evaluate(tau, bar_x, x);
+			resolv->evaluate(tau, bar_x, x);
 			x += Y;
 			debug(x, "resolv_out");
-			const T theta = 1 / sqrt(1 + 2 * tau * resolvent->gamma);
+			const T theta = 1 / sqrt(1 + 2 * tau * resolv->gamma);
 			tau *= theta;
 			sigma /= theta;
 			bar_x = x + (x - old_x) * theta;
