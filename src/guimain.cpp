@@ -471,12 +471,16 @@ struct app_t : Gtk::Application {
 		p->set_size(input.shape());
 		auto run_p = p->runner();
 		run_p->progress_cb = [](double p, string d) {
-			cerr << " " << int(p * 100) << "% " << d << "\r" << flush;
+			cerr << setprecision(5) << setw(8) << (p * 100) << "%  ";
+			const size_t w = 20;
+			const size_t b = p * w;
+			for(size_t i = 0 ; i < w ; i++) cerr << (i < b ? "█" : "▁");
+			cerr << "  " << d << "\r" << flush;
 		};
 		if(debug) {
 			size_t i = 0;
 			run_p->debug_cb = [&](const boost::multi_array<T,2> &a, string desc) {
-				multi_array_to_pixbuf(a)->save(str(boost::format("%s.%d.%s.png") % output_file % (i++) % desc), "png");
+				multi_array_to_pixbuf(a)->save(str(boost::format("%s.%05d.%s.png") % output_file % (i++) % desc), "png");
 			};
 		}
 		auto output = run_p->run(input);
