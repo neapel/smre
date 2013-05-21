@@ -396,7 +396,7 @@ struct app_t : Gtk::Application {
 
 	int on_command_line(const RefPtr<ApplicationCommandLine> &cmd) {
 		try {
-			clctx = make_shared<vex::Context>(vex::Filter::Count(1));
+			clctx = make_shared<vex::Context>(vex::Filter::Count(1) && vex::Filter::Env);
 			vex::StaticContext<>::set(*clctx);
 			cerr << "OpenCL: " << *clctx << endl;
 			p->use_gpu = true;
@@ -453,7 +453,9 @@ struct app_t : Gtk::Application {
 			("dump-mc", bool_switch(&p->dump_mc),
 				"Dump all simulation data");
 
-		options_description desc;
+		options_description desc("Environment variables:\n"
+			"  OMP_NUM_THREADS=<int>  Number of threads to use for CPU (default: 1/core)\n"
+			"  OCL_DEVICE=<name>      OpenCL device to use as GPU");
 		desc.add(main_desc).add(par_desc).add(q_desc);
 		int argc;
 		char **argv = cmd->get_arguments(argc);
