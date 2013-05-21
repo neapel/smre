@@ -126,10 +126,9 @@ struct cpu_fft_convolver : cpu_convolver<T> {
 	fftw::plan<T, T2, 2> fft;
 	fftw::plan<T2, T, 2> ifft;
 	const size2_t s, f_s;
-	A2 temp;
 
 	cpu_fft_convolver(size2_t s)
-	: fft(s), ifft(s), s(s), f_s{{s[0], s[1]/2+1}}, temp(f_s) {}
+	: fft(s), ifft(s), s(s), f_s{{s[0], s[1]/2+1}} {}
 
 	virtual std::shared_ptr<prepared_image> prepare_image(const A &in) {
 		auto i = std::make_shared<prep>(f_s);
@@ -154,6 +153,7 @@ struct cpu_fft_convolver : cpu_convolver<T> {
 	virtual void conv(std::shared_ptr<prepared_image> i, std::shared_ptr<prepared_kernel> k, A &out) {
 		auto fi = std::dynamic_pointer_cast<prep>(i)->f;
 		auto fk = std::dynamic_pointer_cast<prep>(k)->f;
+		A2 temp(f_s);
 		for(size_t i0 = 0 ; i0 < f_s[0] ; i0++)
 			for(size_t i1 = 0 ; i1 < f_s[1] ; i1++)
 				temp[i0][i1] = fi[i0][i1] * fk[i0][i1];
