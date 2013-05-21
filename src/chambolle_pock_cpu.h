@@ -72,23 +72,28 @@ struct chambolle_pock_cpu : public impl<T> {
 		using namespace mimas;
 		using namespace std;
 		impl<T>::q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
-			A data(p.size), convolved(p.size);
 			random_device dev;
-			mt19937 gen(dev());
-			normal_distribution<T> dist(/*mean*/0, /*stddev*/1);
-			//#pragma omp parallel for
+			const size_t seed = dev();
+			#pragma omp parallel for
 			for(size_t i = 0 ; i < p.monte_carlo_steps ; i++) {
+				A data(p.size), convolved(p.size);
+				mt19937 gen(seed + i);
+				normal_distribution<T> dist(/*mean*/0, /*stddev*/1);
 				for(auto row : data) for(auto &x : row) x = dist(gen);
 				auto f_data = convolution->prepare_image(data);
 				for(size_t j = 0 ; j < constraints.size() ; j++) {
 					convolution->conv(f_data, constraints[j].k, convolved);
 					auto norm_inf = max(abs(convolved));
 					auto k_q = norm_inf - constraints[j].shift_q;
-					//#pragma omp critical
+					#pragma omp critical
 					k_qs[j].push_back(k_q);
 				}
-				//#pragma omp critical
+#if HAVE_OPENMP
+				if(omp_get_thread_num() == 0)
+					this->progress(double(i * omp_get_num_threads()) / p.monte_carlo_steps, "Monte Carlo simulation for q");
+#else
 				this->progress(double(i) / p.monte_carlo_steps, "Monte Carlo simulation for q");
+#endif
 			}
 		});
 		for(auto &c : constraints)
