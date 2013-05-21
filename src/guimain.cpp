@@ -44,6 +44,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 	Statusbar statusbar;
 	ProgressBar progress;
+	Label progress_text;
 	Notebook notebook;
 	Image input_image_view, output_image_view;
 
@@ -55,7 +56,6 @@ struct main_window : Gtk::ApplicationWindow {
 	RefPtr<ListStore> steps_model{ListStore::create(steps_columns)};
 	TreeView steps_view{steps_model};
 
-	Menu constraints_menu;
 	RefPtr<Action> load_image{Action::create("load_image", Stock::OPEN, "_Load")};
 	RefPtr<Action> run{Action::create("run", Stock::MEDIA_PLAY, "_Run")};
 	RefPtr<Action> stop{Action::create("stop", Stock::MEDIA_STOP, "_Stop")};
@@ -72,6 +72,7 @@ struct main_window : Gtk::ApplicationWindow {
 	string progress_desc;
 
 	Threads::Thread *current_thread = nullptr;
+	Threads::Mutex mutex;
 	bool continue_run = true, valid = false, have_run = false;
 
 	Dispatcher update_progress, update_output, algorithm_done;
@@ -108,10 +109,10 @@ struct main_window : Gtk::ApplicationWindow {
 
 		// Options
 		auto left_pane = manage(new VBox());
+		left_pane->set_border_width(10);
 		paned->pack_start(*left_pane, PACK_SHRINK);
 		auto options = manage(new Grid());
 		left_pane->pack_start(*options, PACK_SHRINK);
-		options->set_border_width(10);
 		options->set_column_spacing(5);
 		options->set_row_spacing(5);
 		int row = 0;
@@ -247,28 +248,30 @@ struct main_window : Gtk::ApplicationWindow {
 		notebook.append_page(*output_scroll, "Output");
 		// Debug details
 		auto scrolled_window = manage(new ScrolledWindow());
-		notebook.append_page(*scrolled_window, "Debug");
+		int num = notebook.append_page(*scrolled_window, "Debug");
 		scrolled_window->add(steps_view);
 		steps_view.append_column("Description", steps_columns.name);
 		steps_view.append_column("Image", steps_columns.img);
 		steps_view.append_column("Previous", steps_columns.old_img);
 
-		auto progress_b = manage(new ToolButton(progress));
-		progress_b->set_expand(true);
-		progress_b->set_sensitive(false);
-		toolbar->append(*progress_b);
-
-		constraints_menu.show_all();
 		show_all_children();
-		progress.hide();
 		set_default_size(1000, 800);
 
+		progress.hide();
+		left_pane->pack_end(progress, PACK_SHRINK);
+		progress_text.show();
+		left_pane->pack_end(progress_text, PACK_SHRINK);
+
 		update_progress.connect([&]{
+			Threads::Mutex::Lock lock(mutex);
 			progress.set_fraction(progress_value);
-			progress.set_text(progress_desc);
+			progress.show();
+			progress_text.set_text(progress_desc);
+			progress_text.show();
 		});
 
 		update_output.connect([&]{
+			Threads::Mutex::Lock lock(mutex);
 			output_image_view.set(current_output);
 			notebook.set_current_page(1);
 		});
@@ -276,6 +279,7 @@ struct main_window : Gtk::ApplicationWindow {
 		algorithm_done.connect([&]{
 			if(current_thread) current_thread->join();
 			if(debug_value.get_active()) {
+				Threads::Mutex::Lock lock(mutex);
 				steps_model->clear();
 				for(size_t i = 0 ; i < current_log.size() ; i++) {
 					auto row = *steps_model->append();
@@ -288,6 +292,7 @@ struct main_window : Gtk::ApplicationWindow {
 				notebook.set_current_page(2);
 			}
 			progress.hide();
+			progress_text.hide();
 			run->set_sensitive(valid);
 			stop->set_sensitive(false);
 			current_thread = nullptr;
@@ -308,7 +313,6 @@ struct main_window : Gtk::ApplicationWindow {
 	// Run the algorithm in a new thread.
 	void do_run() {
 		have_run = true;
-		progress.show();
 		run->set_sensitive(false);
 		stop->set_sensitive(true);
 		current_log.clear();
@@ -321,17 +325,24 @@ struct main_window : Gtk::ApplicationWindow {
 			p->set_size(input.shape());
 			auto run_p = p->runner();
 			run_p->progress_cb = [=](double p, string d) {
-				progress_value = p;
-				progress_desc = d;
+				{
+					Threads::Mutex::Lock lock(mutex);
+					progress_value = p;
+					progress_desc = d;
+				}
 				update_progress();
 			};
 			run_p->current_cb = [=](const boost::multi_array<T,2> &a, size_t s) {
-				current_output = multi_array_to_pixbuf(a, auto_range_value.get_active());
+				{
+					Threads::Mutex::Lock lock(mutex);
+					current_output = multi_array_to_pixbuf(a, auto_range_value.get_active());
+				}
 				update_output();
 				return continue_run;
 			};
 			if(debug_value.get_active())
 				run_p->debug_cb = [=](const boost::multi_array<T,2> &a, string desc) {
+					Threads::Mutex::Lock lock(mutex);
 					current_log.push_back(debug_state{multi_array_to_pixbuf(a), desc});
 				};
 			auto result = run_p->run(input);
