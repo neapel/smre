@@ -128,7 +128,7 @@ struct chambolle_pock_cpu : public impl<T> {
 			// reset accumulator
 			fill(w, 0);
 			// transform bar_x for convolutions
-			auto f_bar_x = convolution->prepare_image(bar_x);
+			const auto f_bar_x = convolution->prepare_image(bar_x);
 			#pragma omp parallel for
 			for(size_t i = 0 ; i < constraints.size() ; i++) {
 				auto &c = constraints[i];
@@ -140,12 +140,11 @@ struct chambolle_pock_cpu : public impl<T> {
 				// calculate new y_i
 				convolved *= sigma;
 				c.y += convolved;
-				c.y = mimas::multi_func<T>(c.y,
-					[&](T v){return soft_shrink(v, c.q * sigma);});
+				for(auto row : c.y) for(auto &v : row) v = soft_shrink(v, c.q * sigma);
 				#pragma omp critical
 				this->debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
-				auto f_y = convolution->prepare_image(c.y);
+				const auto f_y = convolution->prepare_image(c.y);
 				convolution->conv(f_y, c.adj_k, convolved);
 				#pragma omp critical
 				this->debug(convolved, str(boost::format("adj_convolved_%d") % i));
@@ -158,8 +157,7 @@ struct chambolle_pock_cpu : public impl<T> {
 			this->progress(double(n) / p.max_steps, str(boost::format("Chambolle-Pock step %d") % n));
 
 			old_x = x;
-			w *= tau;
-			bar_x = x; bar_x -= Y; bar_x -= tau;
+			w *= tau; bar_x = x; bar_x -= Y; bar_x -= w;
 			this->debug(bar_x, "resolv_in");
 			resolv->evaluate(tau, bar_x, x);
 			x += Y;
@@ -167,20 +165,14 @@ struct chambolle_pock_cpu : public impl<T> {
 			const T theta = 1 / sqrt(1 + 2 * tau * resolv->gamma);
 			tau *= theta;
 			sigma /= theta;
-			bar_x = x;
-			bar_x -= old_x;
-			bar_x *= theta;
-			bar_x += x;
+			bar_x = x; bar_x -= old_x; bar_x *= theta; bar_x += x;
 			this->debug(bar_x, "bar_x");
 
-			out = Y;
-			out -= x;
+			out = Y; out -= x;
 			if(!this->current(out, n)) break;
 		}
 		return out;
 	}
-
-	#undef debug
 };
 #endif
 

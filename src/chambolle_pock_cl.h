@@ -142,9 +142,9 @@ struct chambolle_pock_gpu : public impl<T> {
 			// reset accumulator
 			w = 0.0f;
 			// transform bar_x for convolutions
-			auto f_bar_x = convolution->prepare_image(bar_x);
+			const auto f_bar_x = convolution->prepare_image(bar_x);
 			for(size_t i = 0 ; i < constraints.size() ; i++) {
-				auto c = constraints[i];
+				auto &c = constraints[i];
 				// convolve bar_x with kernel
 				convolution->conv(f_bar_x, c.k, convolved);
 				debug(convolved, str(boost::format("convolved_%d") % i));
@@ -152,7 +152,7 @@ struct chambolle_pock_gpu : public impl<T> {
 				c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma);
 				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
-				auto f_y = convolution->prepare_image(c.y);
+				const auto f_y = convolution->prepare_image(c.y);
 				convolution->conv(f_y, c.adj_k, convolved);
 				debug(convolved, str(boost::format("adj_convolved_%d") % i));
 				// accumulate
