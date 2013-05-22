@@ -26,23 +26,11 @@ typedef float T;
 struct main_window : Gtk::ApplicationWindow {
 	shared_ptr<params<T>> p;
 	RefPtr<Pixbuf> input_image;
+	SpinButton q_value{Adjustment::create(p->force_q, 0, 100, 0.01, 0.1), 0, 3};
 
-	SpinButton alpha_value{Adjustment::create(p->alpha, 0, 1, 0.1, 1), 0, 2};
-	SpinButton tau_value{Adjustment::create(p->tau, 0, 10000, 10, 100), 0, 0};
-	SpinButton sigma_value{Adjustment::create(p->sigma, 0, 5, 0.01, 0.1), 0.1, 4};
-	SpinButton max_steps_value{Adjustment::create(p->max_steps, 1, 1000)};
-	SpinButton force_q_value{Adjustment::create(p->force_q, 0, 100, 0.01, 0.1), 0, 3};
-	SpinButton mc_steps_value{Adjustment::create(p->monte_carlo_steps, 1, 10000, 10, 100), 0, 0};
-	CheckButton use_gpu_value{"Use OpenCL"};
-	CheckButton use_fft_value{"Use FFT for convolution"};
-	CheckButton resolv_value{"Use H₁ resolvent"};
-	CheckButton penalized_scan_value{"Use penalized scan"};
-	CheckButton debug_value{"Debug log"};
-	CheckButton do_force_q_value{"Threshold (q)"};
-	CheckButton auto_range_value{"Display with auto range"};
-	Entry kernels_value;
+	CheckButton debug_value{"Record debug log"};
+	CheckButton auto_range_value{"Display with adjusted range"};
 
-	Statusbar statusbar;
 	ProgressBar progress;
 	Label progress_text;
 	Notebook notebook;
@@ -56,10 +44,11 @@ struct main_window : Gtk::ApplicationWindow {
 	RefPtr<ListStore> steps_model{ListStore::create(steps_columns)};
 	TreeView steps_view{steps_model};
 
-	RefPtr<Action> load_image{Action::create("load_image", Stock::OPEN, "_Load")};
+	RefPtr<Action> load_image{Action::create("load_image", Stock::OPEN, "_Load image")};
+	RefPtr<Action> save_image{Action::create("save_image", Stock::SAVE, "_Save image")};
 	RefPtr<Action> run{Action::create("run", Stock::MEDIA_PLAY, "_Run")};
-	RefPtr<Action> stop{Action::create("stop", Stock::MEDIA_STOP, "_Stop")};
-	RefPtr<ToggleAction> auto_run{ToggleAction::create("auto-run", Stock::REFRESH, "Auto Run")};
+	RefPtr<Action> stop{Action::create("stop", Stock::MEDIA_STOP, "S_top")};
+	RefPtr<ToggleAction> auto_run{ToggleAction::create("auto-run", Stock::REFRESH, "_Auto Run")};
 
 	struct debug_state {
 		RefPtr<Pixbuf> img;
@@ -77,7 +66,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 	Dispatcher update_progress, update_output, algorithm_done;
 
-	main_window(shared_ptr<params<T>> p, bool debug = false) : p(p) {
+	main_window(shared_ptr<params<T>> p, bool debug, bool gpu_enabled) : p(p) {
 		// Main layout
 		auto vbox = manage(new VBox());
 		add(*vbox);
@@ -86,22 +75,58 @@ struct main_window : Gtk::ApplicationWindow {
 		vbox->pack_start(*toolbar, PACK_SHRINK);
 
 		// Actions
-		load_image->set_is_important(true);
-		load_image->signal_activate().connect([&]{do_load_image();});
-		toolbar->append(*load_image->create_tool_item());
+		{
+			load_image->set_is_important(true);
+			toolbar->append(*load_image->create_tool_item());
+			load_image->signal_activate().connect([=]{
+				FileChooserDialog dialog(*this, "Please choose an image file", FILE_CHOOSER_ACTION_OPEN);
+				dialog.add_button(Stock::CANCEL, RESPONSE_CANCEL);
+				dialog.add_button(Stock::OPEN, RESPONSE_OK);
+				auto filter = FileFilter::create();
+				filter->set_name("Image files");
+				filter->add_pixbuf_formats();
+				dialog.add_filter(filter);
+				if(dialog.run() == RESPONSE_OK)
+					open(dialog.get_filename());
+			});
 
-		run->set_is_important(true);
-		run->set_sensitive(false);
-		run->signal_activate().connect([&]{do_run();});
-		toolbar->append(*run->create_tool_item());
+			save_image->set_is_important(true);
+			save_image->set_sensitive(false);
+			toolbar->append(*save_image->create_tool_item());
+			save_image->signal_activate().connect([=]{
+				FileChooserDialog dialog(*this, "Please choose a filename to save as", FILE_CHOOSER_ACTION_SAVE);
+				dialog.set_do_overwrite_confirmation();
+				dialog.set_create_folders();
+				dialog.add_button(Stock::CANCEL, RESPONSE_CANCEL);
+				dialog.add_button(Stock::SAVE, RESPONSE_OK);
+				auto filter = FileFilter::create();
+				filter->set_name("PNG files");
+				filter->add_pattern("*.png");
+				dialog.add_filter(filter);
+				if(dialog.run() == RESPONSE_OK) {
+					current_output->save(dialog.get_filename(), "png");
+				}
+			});
 
-		stop->set_is_important(true);
-		stop->set_sensitive(false);
-		stop->signal_activate().connect([&]{ continue_run = false; });
-		toolbar->append(*stop->create_tool_item());
+			run->set_is_important(true);
+			run->set_sensitive(false);
+			toolbar->append(*run->create_tool_item());
+			run->signal_activate().connect([&]{do_run();});
 
-		auto_run->set_is_important(true);
-		toolbar->append(*auto_run->create_tool_item());
+			stop->set_is_important(true);
+			stop->set_sensitive(false);
+			toolbar->append(*stop->create_tool_item());
+			stop->signal_activate().connect([=]{
+				continue_run = false;
+				stop->set_sensitive(false);
+			});
+
+			auto_run->set_is_important(true);
+			toolbar->append(*auto_run->create_tool_item());
+			auto_run->signal_toggled().connect([=]{
+				validate();
+			});
+		}
 
 		// Main area
 		auto paned = manage(new HBox());
@@ -117,127 +142,245 @@ struct main_window : Gtk::ApplicationWindow {
 		options->set_row_spacing(5);
 		int row = 0;
 
-		options->attach(use_gpu_value, 0, row++, 2, 1);
+		// Kernels
+		{
+			auto kernels_label = manage(new Label("Box sizes (<i>h</i>)", ALIGN_START));
+			kernels_label->set_use_markup();
+			options->attach(*kernels_label, 0, row, 1, 1);
+			auto kernels_value = manage(new Entry());
+			kernels_value->set_placeholder_text("1,3,...,10; 50..55");
+			if(p->kernel_sizes.empty()) kernels_value->set_text("2,4,...,50");
+			else kernels_value->set_text(p->kernel_sizes.expr);
+			options->attach(*kernels_value, 1, row++, 1, 1);
 
-		auto kernels_label = manage(new Label("Kernel sizes (h)", ALIGN_START));
-		options->attach(*kernels_label, 0, row, 1, 1);
-		kernels_value.set_placeholder_text("1,3,...,10; 50..55");
-		if(p->kernel_sizes.empty()) kernels_value.set_text("2,4,...,50");
-		else kernels_value.set_text(p->kernel_sizes.expr);
-		options->attach(kernels_value, 1, row++, 1, 1);
-
-		options->attach(use_fft_value, 0, row++, 2, 1);
-
-		auto max_steps_label = manage(new Label("Max. steps", ALIGN_START));
-		options->attach(*max_steps_label, 0, row, 1, 1);
-		options->attach(max_steps_value, 1, row++, 1, 1);
-
-		auto tau_label = manage(new Label("Step (τ)", ALIGN_START));
-		options->attach(*tau_label, 0, row, 1, 1);
-		options->attach(tau_value, 1, row++, 1, 1);
-
-		auto sigma_label = manage(new Label("Step (σ)", ALIGN_START));
-		options->attach(*sigma_label, 0, row, 1, 1);
-		options->attach(sigma_value, 1, row++, 1, 1);
-
-		options->attach(resolv_value, 0, row++, 2, 1);
-
-		options->attach(do_force_q_value, 0, row, 1, 1);
-		options->attach(force_q_value, 1, row++, 1, 1);
-
-		auto alpha_label = manage(new Label("α", ALIGN_START));
-		options->attach(*alpha_label, 0, row, 1, 1);
-		options->attach(alpha_value, 1, row++, 1, 1);
-
-		auto mc_steps_label = manage(new Label("MC Steps", ALIGN_START));
-		options->attach(*mc_steps_label, 0, row, 1, 1);
-		options->attach(mc_steps_value, 1, row++, 1, 1);
-
-		options->attach(penalized_scan_value, 0, row++, 2, 1);
-
-		debug_value.set_active(debug);
-		options->attach(debug_value, 0, row++, 2, 1);
-
-		options->attach(auto_range_value, 0, row++, 2, 1);
-
-		// Connect to model
-		alpha_value.signal_value_changed().connect([=]{
-			p->alpha = alpha_value.get_value();
-			validate();
-		});
-		tau_value.signal_value_changed().connect([=]{
-			p->tau = tau_value.get_value();
-			validate();
-		});
-		sigma_value.signal_value_changed().connect([=]{
-			p->sigma = sigma_value.get_value();
-			validate();
-		});
-		max_steps_value.signal_value_changed().connect([=]{
-			p->max_steps = max_steps_value.get_value();
-			validate();
-		});
-		mc_steps_value.signal_value_changed().connect([=]{
-			p->monte_carlo_steps = mc_steps_value.get_value();
-			validate();
-		});
-
-		auto q_ = [=]{
-			const bool f = do_force_q_value.get_active();
-			mc_steps_value.set_sensitive(!f);
-			alpha_value.set_sensitive(!f);
-			force_q_value.set_sensitive(f);
-			p->force_q = f ? force_q_value.get_value() : -1;
-			validate();
-		};
-		do_force_q_value.set_active(p->force_q >= 0);
-		do_force_q_value.signal_toggled().connect(q_);
-		q_();
-		force_q_value.signal_value_changed().connect([=]{
-			if(do_force_q_value.get_active()) {
-				p->force_q = force_q_value.get_value();
+			auto k_ = [=]{
+				p->kernel_sizes.clear();
+				try {
+					p->kernel_sizes = sizes_t(kernels_value->get_text());
+					kernels_value->unset_icon(ENTRY_ICON_SECONDARY);
+				} catch(invalid_argument e) {
+					kernels_value->set_icon_from_stock(Stock::DIALOG_ERROR, ENTRY_ICON_SECONDARY);
+				}
 				validate();
+			};
+			kernels_value->signal_changed().connect(k_);
+			k_();
+		}
+
+		// Implementation
+		{
+			auto impl_label = manage(new Label("Convolver", ALIGN_START));
+			options->attach(*impl_label, 0, row, 1, 1);
+			auto impl_box = manage(new HBox());
+			impl_box->get_style_context()->add_class(GTK_STYLE_CLASS_LINKED);
+			options->attach(*impl_box, 1, row++, 1, 1);
+			RadioButton::Group impl_group;
+			auto use_sat = manage(new RadioButton{impl_group, "SAT"});
+			use_sat->set_sensitive(gpu_enabled);
+			use_sat->set_mode(false);
+			impl_box->pack_start(*use_sat);
+			auto use_clfft = manage(new RadioButton{impl_group, "CLFFT"});
+			use_clfft->set_sensitive(gpu_enabled);
+			use_clfft->set_mode(false);
+			impl_box->pack_start(*use_clfft);
+			auto use_fftw = manage(new RadioButton{impl_group, "FFTW"});
+			use_fftw->set_mode(false);
+			impl_box->pack_start(*use_fftw);
+
+			if(!p->use_gpu) use_fftw->set_active(true);
+			else if(p->use_fft) use_clfft->set_active(true);
+			else use_sat->set_active(true);
+			auto impl_cb = [=]{
+				if(use_fftw->get_active()) {
+					p->use_gpu = false; p->use_fft = true;
+				} else if(use_clfft->get_active()) {
+					p->use_gpu = true; p->use_fft = true;
+				} else {
+					p->use_gpu = true; p->use_fft = false;
+				}
+				validate();
+			};
+			use_fftw->signal_toggled().connect(impl_cb);
+			use_clfft->signal_toggled().connect(impl_cb);
+			use_sat->signal_toggled().connect(impl_cb);
+			impl_cb();
+		}
+
+		options->attach(*manage(new HSeparator), 0, row++, 2, 1);
+
+		// Stop condition
+		{
+			auto max_steps_label = manage(new Label("Max. steps", ALIGN_START));
+			options->attach(*max_steps_label, 0, row, 1, 1);
+			auto max_steps_value = manage(new SpinButton{Adjustment::create(p->max_steps, 1, 1000)});
+			options->attach(*max_steps_value, 1, row++, 1, 1);
+			max_steps_value->signal_value_changed().connect([=]{
+				p->max_steps = max_steps_value->get_value();
+				validate();
+			});
+		}
+
+		// Step sizes
+		{
+			auto tau_label = manage(new Label("Step (τ)", ALIGN_START));
+			options->attach(*tau_label, 0, row, 1, 1);
+			auto tau_value = manage(new SpinButton{Adjustment::create(p->tau, 0, 10000, 10, 100), 0, 0});
+			options->attach(*tau_value, 1, row++, 1, 1);
+			tau_value->signal_value_changed().connect([=]{
+				p->tau = tau_value->get_value();
+				validate();
+			});
+
+			auto sigma_label = manage(new Label("Step (σ)", ALIGN_START));
+			options->attach(*sigma_label, 0, row, 1, 1);
+			auto sigma_value = manage(new SpinButton{Adjustment::create(p->sigma, 0, 5, 0.01, 0.1), 0.1, 4});
+			options->attach(*sigma_value, 1, row++, 1, 1);
+			sigma_value->signal_value_changed().connect([=]{
+				p->sigma = sigma_value->get_value();
+				validate();
+			});
+		}
+
+		options->attach(*manage(new HSeparator), 0, row++, 2, 1);
+
+		// Resolvent
+		{
+			auto resolv_label = manage(new Label("Resolvent", ALIGN_START));
+			options->attach(*resolv_label, 0, row, 1, 1);
+			auto resolv_box = manage(new HBox());
+			resolv_box->get_style_context()->add_class(GTK_STYLE_CLASS_LINKED);
+			options->attach(*resolv_box, 1, row++, 1, 1);
+			RadioButton::Group res_group;
+			auto resolv_h1 = manage(new RadioButton{res_group, "H₁"});
+			resolv_h1->set_mode(false);
+			resolv_box->pack_start(*resolv_h1);
+			auto resolv_l2 = manage(new RadioButton{res_group, "L₂"});
+			resolv_l2->set_mode(false);
+			resolv_box->pack_start(*resolv_l2);
+
+			auto delta_label = manage(new Label("L₂-mix (δ)", ALIGN_START));
+			options->attach(*delta_label, 0, row, 1, 1);
+			auto delta_value = manage(new SpinButton{Adjustment::create(0.5, 0, 1, 0.1, 1), 0, 2});
+			options->attach(*delta_value, 1, row++, 1, 1);
+
+			auto try_h1 = dynamic_pointer_cast<resolvent_h1_params<T>>(p->resolvent);
+			if(try_h1) {
+				delta_value->set_value(try_h1->delta);
+				resolv_h1->set_active(true);
+			} else {
+				resolv_l2->set_active(true);
 			}
-		});
 
-		use_gpu_value.set_active(p->use_gpu);
-		use_gpu_value.signal_toggled().connect([=]{
-			p->use_gpu = use_gpu_value.get_active();
-			validate();
-		});
+			auto resolv_cb = [=]{
+				if(resolv_h1->get_active()) {
+					p->resolvent = make_shared<resolvent_h1_params<T>>(delta_value->get_value());
+					delta_value->set_sensitive(true);
+				} else {
+					p->resolvent = make_shared<resolvent_l2_params<T>>();
+					delta_value->set_sensitive(false);
+				}
+				validate();
+			};
+			resolv_h1->signal_toggled().connect(resolv_cb);
+			resolv_l2->signal_toggled().connect(resolv_cb);
+			delta_value->signal_value_changed().connect(resolv_cb);
+			resolv_cb();
+		}
 
-		use_fft_value.set_active(p->use_fft);
-		use_fft_value.signal_toggled().connect([=]{
-			p->use_fft = use_fft_value.get_active();
-			validate();
-		});
+		options->attach(*manage(new HSeparator), 0, row++, 2, 1);
 
-		resolv_value.signal_toggled().connect([=]{
-			if(resolv_value.get_active()) p->resolvent = make_shared<resolvent_h1_params<T>>();
-			else p->resolvent = make_shared<resolvent_l2_params<T>>();
-			validate();
-		});
+		// q
+		{
+			auto method_label = manage(new Label("Threshold (<i>q</i>)", ALIGN_START));
+			method_label->set_use_markup();
+			options->attach(*method_label, 0, row, 1, 1);
+			auto method_box = manage(new HBox());
+			method_box->get_style_context()->add_class(GTK_STYLE_CLASS_LINKED);
+			options->attach(*method_box, 1, row++, 1, 1);
+			RadioButton::Group method_group;
+			auto force_q = manage(new RadioButton{method_group, "fixed"});
+			force_q->set_mode(false);
+			method_box->pack_start(*force_q);
+			auto simulate_q = manage(new RadioButton{method_group, "simulate"});
+			simulate_q->set_mode(false);
+			method_box->pack_start(*simulate_q);
+			if(p->force_q >= 0) force_q->set_active(true);
+			else simulate_q->set_active(true);
 
-		penalized_scan_value.set_active(p->penalized_scan);
-		penalized_scan_value.signal_toggled().connect([=]{
-			p->penalized_scan = penalized_scan_value.get_active();
-			validate();
-		});
+			auto q_label = manage(new Label("Value", ALIGN_START));
+			options->attach(*q_label, 0, row, 1, 1);
+			options->attach(q_value, 1, row++, 1, 1);
+			q_value.signal_value_changed().connect([=]{
+				if(!force_q->get_active()) return;
+				p->force_q = q_value.get_value();
+				validate();
+			});
 
-		auto k_ = [=]{
-			p->kernel_sizes.clear();
-			try {
-				p->kernel_sizes = sizes_t(kernels_value.get_text());
-				kernels_value.unset_icon(ENTRY_ICON_SECONDARY);
-			} catch(invalid_argument e) {
-				kernels_value.set_icon_from_stock(Stock::DIALOG_ERROR, ENTRY_ICON_SECONDARY);
-			}
-			validate();
-		};
-		kernels_value.signal_changed().connect(k_);
-		k_();
+			auto alpha_label = manage(new Label("Quantile (α)", ALIGN_START));
+			options->attach(*alpha_label, 0, row, 1, 1);
+			auto alpha_value = manage(new SpinButton{Adjustment::create(p->alpha, 0, 1, 0.1, 1), 0, 2});
+			options->attach(*alpha_value, 1, row++, 1, 1);
+			alpha_value->signal_value_changed().connect([=]{
+				p->alpha = alpha_value->get_value();
+				validate();
+			});
+
+			auto mc_steps_label = manage(new Label("Steps", ALIGN_START));
+			options->attach(*mc_steps_label, 0, row, 1, 1);
+			auto mc_steps_value = manage(new SpinButton{Adjustment::create(p->monte_carlo_steps, 1, 10000, 10, 100), 0, 0});
+			options->attach(*mc_steps_value, 1, row++, 1, 1);
+			mc_steps_value->signal_value_changed().connect([=]{
+				p->monte_carlo_steps = mc_steps_value->get_value();
+				validate();
+			});
+
+			auto corr_label = manage(new Label("Correction", ALIGN_START));
+			options->attach(*corr_label, 0, row, 1, 1);
+			auto corr_box = manage(new HBox());
+			corr_box->get_style_context()->add_class(GTK_STYLE_CLASS_LINKED);
+			options->attach(*corr_box, 1, row++, 1, 1);
+			RadioButton::Group corr_group;
+			auto no_corr_value = manage(new RadioButton{corr_group, "none"});
+			no_corr_value->set_mode(false);
+			corr_box->pack_start(*no_corr_value);
+			auto penalized_scan_value = manage(new RadioButton{corr_group, "penalized scan"});
+			penalized_scan_value->set_mode(false);
+			corr_box->pack_start(*penalized_scan_value);
+			if(p->penalized_scan) penalized_scan_value->set_active(true);
+			else no_corr_value->set_active(true);
+			penalized_scan_value->signal_toggled().connect([=]{
+				p->penalized_scan = penalized_scan_value->get_active();
+				validate();
+			});
+
+			auto q_cb = [=]{
+				const bool f = force_q->get_active();
+				mc_steps_value->set_sensitive(!f);
+				alpha_value->set_sensitive(!f);
+				q_value.set_sensitive(f);
+				p->force_q = f ? q_value.get_value() : -1;
+				validate();
+			};
+			force_q->signal_toggled().connect(q_cb);
+			q_cb();
+		}
+
+		options->attach(*manage(new HSeparator), 0, row++, 2, 1);
+
+		// Misc
+		{
+			debug_value.set_active(debug);
+			options->attach(debug_value, 0, row++, 2, 1);
+			options->attach(auto_range_value, 0, row++, 2, 1);
+		}
 
 		// Output
+		notebook.set_margin_top(5);
+		auto nb_ctx = notebook.get_style_context();
+		auto notebook_bg = nb_ctx->get_background_color();
+		output_image_view.override_background_color(notebook_bg);
+		input_image_view.override_background_color(notebook_bg);
+		steps_view.override_background_color(notebook_bg);
 		paned->pack_start(notebook);
 		// Scroll-locked image views for comparison
 		auto original_scroll = manage(new ScrolledWindow());
@@ -248,31 +391,30 @@ struct main_window : Gtk::ApplicationWindow {
 		notebook.append_page(*output_scroll, "Output");
 		// Debug details
 		auto scrolled_window = manage(new ScrolledWindow());
-		int num = notebook.append_page(*scrolled_window, "Debug");
+		notebook.append_page(*scrolled_window, "Debug");
 		scrolled_window->add(steps_view);
 		steps_view.append_column("Description", steps_columns.name);
 		steps_view.append_column("Image", steps_columns.img);
 		steps_view.append_column("Previous", steps_columns.old_img);
 
+		// Visible done.
 		show_all_children();
 		set_default_size(1000, 800);
 
-		progress.hide();
+		// Progress
 		left_pane->pack_end(progress, PACK_SHRINK);
-		progress_text.show();
 		left_pane->pack_end(progress_text, PACK_SHRINK);
 
 		update_progress.connect([&]{
 			Threads::Mutex::Lock lock(mutex);
 			progress.set_fraction(progress_value);
-			progress.show();
 			progress_text.set_text(progress_desc);
-			progress_text.show();
 		});
 
 		update_output.connect([&]{
 			Threads::Mutex::Lock lock(mutex);
 			output_image_view.set(current_output);
+			save_image->set_sensitive(true);
 			notebook.set_current_page(1);
 		});
 
@@ -312,9 +454,12 @@ struct main_window : Gtk::ApplicationWindow {
 
 	// Run the algorithm in a new thread.
 	void do_run() {
-		have_run = true;
 		run->set_sensitive(false);
 		stop->set_sensitive(true);
+		progress.set_fraction(0);
+		progress.show();
+		progress_text.set_text("Starting");
+		progress_text.show();
 		current_log.clear();
 
 		// start thread
@@ -324,6 +469,7 @@ struct main_window : Gtk::ApplicationWindow {
 			auto input = pixbuf_to_multi_array(input_image);
 			p->set_size(input.shape());
 			auto run_p = p->runner();
+			have_run = true;
 			run_p->progress_cb = [=](double p, string d) {
 				{
 					Threads::Mutex::Lock lock(mutex);
@@ -346,24 +492,9 @@ struct main_window : Gtk::ApplicationWindow {
 					current_log.push_back(debug_state{multi_array_to_pixbuf(a), desc});
 				};
 			auto result = run_p->run(input);
-			force_q_value.set_value(run_p->q);
+			q_value.set_value(run_p->q);
 			algorithm_done();
 		});
-	}
-
-
-	// Select and load the image into a pixbuf.
-	void do_load_image() {
-		FileChooserDialog dialog(*this, "Please choose an image file", FILE_CHOOSER_ACTION_OPEN);
-		dialog.add_button(Stock::CANCEL, RESPONSE_CANCEL);
-		dialog.add_button(Stock::OPEN, RESPONSE_OK);
-		auto filter = FileFilter::create();
-		filter->set_name("Image files");
-		filter->add_pixbuf_formats();
-		dialog.add_filter(filter);
-
-		if(dialog.run() == RESPONSE_OK)
-			open(dialog.get_filename());
 	}
 
 	void open(RefPtr<Pixbuf> image) {
@@ -384,7 +515,7 @@ using namespace Gio;
 using namespace boost::program_options;
 
 struct app_t : Gtk::Application {
-	bool debug = false;
+	bool debug = false, gpu_available = false;
 	string input_file;
 	shared_ptr<main_window> main;
 
@@ -395,15 +526,17 @@ struct app_t : Gtk::Application {
 	: Gtk::Application("smre.main", APPLICATION_HANDLES_COMMAND_LINE | APPLICATION_NON_UNIQUE) {}
 
 	int on_command_line(const RefPtr<ApplicationCommandLine> &cmd) {
-		try {
-			clctx = make_shared<vex::Context>(vex::Filter::Count(1) && vex::Filter::Env);
+		clctx = make_shared<vex::Context>(vex::Filter::Count(1) && vex::Filter::Env);
+		if(*clctx) {
 			vex::StaticContext<>::set(*clctx);
 			cerr << "OpenCL: " << *clctx << endl;
+			gpu_available = true;
 			p->use_gpu = true;
 			p->use_fft = false;
-		} catch(cl::Error &e) {
-			cerr << "OpenCL unavailable: " << e << endl;
+		} else {
+			cerr << "OpenCL unavailable." << endl;
 			p->use_gpu = false;
+			p->use_fft = true;
 		}
 
 		string output_file;
@@ -416,7 +549,7 @@ struct app_t : Gtk::Application {
 				"input image file (png,jpeg,…)")
 			("output,o", value(&output_file)->value_name("<file>"),
 				"output image file (png) → disables GUI");
-		if(p->use_gpu) main_desc.add_options()
+		if(gpu_available) main_desc.add_options()
 			("cpu", value(&p->use_gpu)->implicit_value(false)->zero_tokens(),
 				"Use CPU/FFTW (default: GPU/OpenCL)");
 		main_desc.add_options()("fft", value(&p->use_fft)->implicit_value(true)->zero_tokens(),
@@ -457,10 +590,12 @@ struct app_t : Gtk::Application {
 			"  OMP_NUM_THREADS=<int>  Number of threads to use for CPU (default: 1/core)\n"
 			"  OCL_DEVICE=<name>      OpenCL device to use as GPU");
 		desc.add(main_desc).add(par_desc).add(q_desc);
+		positional_options_description pos;
+		pos.add("input", -1);
 		int argc;
 		char **argv = cmd->get_arguments(argc);
 		variables_map vm;
-		store(parse_command_line(argc, argv, desc), vm);
+		store(command_line_parser(argc, argv).options(desc).positional(pos).run(), vm);
 		notify(vm);
 		if(vm.count("help")) {
 			cerr << desc << endl;
@@ -502,7 +637,7 @@ struct app_t : Gtk::Application {
 	}
 
 	void on_activate() {
-		main = make_shared<main_window>(p, debug);
+		main = make_shared<main_window>(p, debug, gpu_available);
 		add_window(*main);
 		if(!input_file.empty()) main->open(input_file);
 		main->show();
@@ -513,6 +648,6 @@ int main(int argc, char **argv) {
 	try {
 		return app_t().run(argc, argv);
 	} catch(cl::Error &e) {
-		cerr << e << endl;
+		cerr << "OpenCL error: " << e << endl;
 	}
 }
