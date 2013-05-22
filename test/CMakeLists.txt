@@ -1,7 +1,3 @@
-
-# Test harness
-#set(CMAKE_REQUIRED_LIBRARIES smre ${CMAKE_REQUIRED_LIBRARIES})
-
 macro(tiny_test NAME)
 	add_executable(${NAME} "${NAME}.cpp")
 	target_link_libraries(${NAME} ${CMAKE_REQUIRED_LIBRARIES})
@@ -9,7 +5,6 @@ macro(tiny_test NAME)
 		NAME ${NAME}
 		COMMAND ${NAME} ${ARGN}
 	)
-	add_dependencies(${NAME} smre)
 endmacro()
 
 set(MAT_DIR "${CMAKE_SOURCE_DIR}/matfiles")
@@ -47,13 +42,12 @@ set(MAT_DIR "${CMAKE_SOURCE_DIR}/matfiles")
 #if(HAVE_OPENCL)
 #	tiny_test(test_opencl)
 #	tiny_test(test_opencl_multi_array)
-#	tiny_test(test_opencl_fft)
 #endif()
 
 #tiny_test(test_kernel_generator)
 #tiny_test(test_resolvent)
 tiny_test(test_constraint_parser)
+tiny_test(test_resolvent_parser)
 tiny_test(convolution)
 
 tiny_test(convolution_error)
-target_link_libraries(convolution_error "-lmpfr")

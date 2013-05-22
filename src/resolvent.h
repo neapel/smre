@@ -245,27 +245,36 @@ std::shared_ptr<resolvent_gpu<T>> resolvent_h1_params<T>::gpu_runner(size2_t siz
 
 
 // parse
+#include <boost/regex.hpp>
+#include <boost/lexical_cast.hpp>
+
 template<class T>
 std::ostream &operator<<(std::ostream &o, const std::shared_ptr<resolvent_params<T>> &p) {
 	return o << p->desc();
 }
+
 template<class T>
-std::istream &operator>>(std::istream &i, std::shared_ptr<resolvent_params<T>> &p) {
-	std::string tp; i >> tp;
-	if(tp == "L2" || tp == "l2") {
-		p = std::make_shared<resolvent_l2_params<T>>();
-		return i;
-	} else if(tp == "H1" || tp == "h1") {
-		T parm;
-		if(i >> parm) {
-			p = std::make_shared<resolvent_h1_params<T>>(parm);
-			return i;
-		} else {
-			p = std::make_shared<resolvent_h1_params<T>>();
-			return i;
-		}
+std::istream &operator>>(std::istream &i, std::shared_ptr<resolvent_params<T>> &ret) {
+	using namespace boost;
+	using namespace std;
+	istream_iterator<char> begin{i}, end;
+	string s(begin, end);
+	static regex r(R"(\s*((?<l2>l2)|(?<h1>h1([ :,=](?<delta>\d+(\.\d*)?))?))\s*)", regex::icase);
+	smatch m;
+	if(!regex_match(s, m, r)) {
+		throw invalid_argument("Use `L2` or `H1` or `H1 <delta>`.");
 	}
-	throw std::invalid_argument("Use `L2` or `H1` or `H1 <delta>`.");
+	if(m["l2"].matched)
+		ret = std::make_shared<resolvent_l2_params<T>>();
+	else if(m["h1"].matched) {
+		if(m["delta"].matched)
+			ret = std::make_shared<resolvent_h1_params<T>>(lexical_cast<T>(m["delta"]));
+		else
+			ret = std::make_shared<resolvent_h1_params<T>>();
+	}
+	i.unget();
+	i.clear(); // otherwise lexical_cast fails.
+	return i;
 }
 
 #endif

@@ -30,8 +30,8 @@ struct sizes_t : std::vector<size_t> {
 		using namespace boost;
 		using namespace std;
 		vector<size_t> expr_l;
-		regex r_pow(R"(\s*((?<base>\d+)\s*(\^|\*\*)\s*)?(?<start>\d+)((?<list>(\s*,\s*(\d+))+)|((\s*,\s*(?<next>\d+))?\s*,?\s*\.{2,}\s*,?\s*(?<end>\d+)))?\s*)");
-		regex r_expr(R"([;:+])"), r_list(R"(\d+)");
+		static regex r_pow(R"(\s*((?<base>\d+)\s*(\^|\*\*)\s*)?(?<start>\d+)((?<list>(\s*,\s*(\d+))+)|((\s*,\s*(?<next>\d+))?\s*,?\s*\.{2,}\s*,?\s*(?<end>\d+)))?\s*)");
+		static regex r_expr(R"([;:+])"), r_list(R"(\d+)");
 		for(auto s_pow : make_regex_token_iterator(expr, r_expr, -1)) {
 			auto s = s_pow.str(); // mandatory??? regex_match(s_pow.str()...) breaks.
 			smatch m;
@@ -89,6 +89,8 @@ struct sizes_t : std::vector<size_t> {
 std::istream &operator>>(std::istream &i, sizes_t &s) {
 	std::istream_iterator<char> begin{i}, end;
 	s = sizes_t(std::string(begin, end));
+	i.unget();
+	i.clear(); // otherwise lexical_cast fails.
 	return i;
 }
 
