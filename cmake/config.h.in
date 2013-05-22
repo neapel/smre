@@ -1,20 +1,6 @@
 #ifndef __CONFIG_H__
 #define __CONFIG_H__
 
-#define VERSION "${VERSION}"
-
-// libmatio
-#cmakedefine HAVE_MATIO 1
-#cmakedefine HAVE_OPENCL 1
-#cmakedefine HAVE_AMD_FFT 1
 #cmakedefine HAVE_OPENMP 1
-
-// format libs for GIL
-#cmakedefine HAVE_JPEG 1
-#cmakedefine HAVE_PNG 1
-#cmakedefine HAVE_TIFF 1
-#cmakedefine HAVE_GIL 1
-
-#define GTK_RESOURCE_PATH "${CMAKE_CURRENT_BINARY_DIR}/src/"
 
 #endif
