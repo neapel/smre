@@ -4,7 +4,7 @@
 #include <boost/format.hpp>
 
 #include "convolution.h"
-
+#include "image_variance.h"
 #include "chambolle_pock.h"
 #include <vexcl/random.hpp>
 
@@ -13,6 +13,8 @@ struct chambolle_pock_gpu : public impl<T> {
 	typedef vex::vector<T> A;
 
 	using impl<T>::p;
+	using impl<T>::input_variance;
+	using impl<T>::q;
 
 	struct constraint {
 		size_t k_size;
@@ -64,7 +66,7 @@ struct chambolle_pock_gpu : public impl<T> {
 
 	void calc_q() {
 		// If needed, calculate `q/sigma` value.
-		impl<T>::q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
+		q = this->cached_q([&](std::vector<std::vector<T>> &k_qs){
 			const vex::Reductor<T, vex::MAX> max;
 			A data(size_1d), convolved(size_1d);
 			vex::RandomNormal<T> random;
@@ -83,24 +85,24 @@ struct chambolle_pock_gpu : public impl<T> {
 			}
 		});
 		for(auto &c : constraints)
-			c.q = impl<T>::q + c.shift_q;
+			c.q = q + c.shift_q;
 	}
 
 
 	bool current(const A &a, size_t s) {
-		if(impl<T>::current_cb) {
+		if(this->current_cb) {
 			boost::multi_array<T, 2> a_(p.size);
 			copy(a, a_.data());
-			return impl<T>::current_cb(a_, s);
+			return this->current_cb(a_, s);
 		}
 		return true;
 	}
 
 	void debug(const A &a, std::string d) {
-		if(impl<T>::debug_cb) {
+		if(this->debug_cb) {
 			boost::multi_array<T, 2> a_(p.size);
 			copy(a, a_.data());
-			impl<T>::debug_cb(a_, d);
+			this->debug_cb(a_, d);
 		}
 	}
 
@@ -111,6 +113,11 @@ struct chambolle_pock_gpu : public impl<T> {
 			for(size_t i1 = 0 ; i1 < 20 ; i1++)
 				Y_[i0 + 20][i1 + 20] = 0;
 #endif
+		if(p.input_variance >= 0)
+			input_variance = p.input_variance;
+		else
+			input_variance = median_absolute_deviation(Y_);
+
 		A Y(size_1d, Y_.data()), out(size_1d);
 		run(Y, out);
 		boost::multi_array<T, 2> out_(p.size);
@@ -149,7 +156,7 @@ struct chambolle_pock_gpu : public impl<T> {
 				convolution->conv(f_bar_x, c.k, convolved);
 				debug(convolved, str(boost::format("convolved_%d") % i));
 				// calculate new y_i
-				c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma);
+				c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma * input_variance);
 				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
 				const auto f_y = convolution->prepare_image(c.y);

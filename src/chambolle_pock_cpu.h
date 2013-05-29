@@ -6,6 +6,7 @@
 #include "chambolle_pock.h"
 #include "resolvent.h"
 #include "convolution.h"
+#include "image_variance.h"
 
 
 #if HAVE_OPENMP
@@ -19,6 +20,8 @@ struct chambolle_pock_cpu : public impl<T> {
 	typedef boost::multi_array<T, 2> A;
 
 	using impl<T>::p;
+	using impl<T>::input_variance;
+	using impl<T>::q;
 
 	struct constraint {
 		// size of the box kernel.
@@ -71,7 +74,7 @@ struct chambolle_pock_cpu : public impl<T> {
 	void calc_q() {
 		using namespace mimas;
 		using namespace std;
-		impl<T>::q = impl<T>::cached_q([&](std::vector<std::vector<T>> &k_qs){
+		q = this->cached_q([&](std::vector<std::vector<T>> &k_qs){
 			random_device dev;
 			const size_t seed = dev();
 			#pragma omp parallel for
@@ -97,7 +100,7 @@ struct chambolle_pock_cpu : public impl<T> {
 			}
 		});
 		for(auto &c : constraints)
-			c.q = impl<T>::q + c.shift_q;
+			c.q = q + c.shift_q;
 	}
 
 	virtual A run(const A &Y_) {
@@ -116,6 +119,11 @@ struct chambolle_pock_cpu : public impl<T> {
 			update_kernels();
 			initialized = true;
 		}
+
+		if(p.input_variance >= 0)
+			input_variance = p.input_variance;
+		else
+			input_variance = median_absolute_deviation(Y_);
 
 		this->debug(x, "x_in");
 		for(auto &c : constraints) {
@@ -145,7 +153,7 @@ struct chambolle_pock_cpu : public impl<T> {
 				// calculate new y_i
 				convolved *= sigma;
 				c.y += convolved;
-				for(auto row : c.y) for(auto &v : row) v = soft_shrink(v, c.q * sigma);
+				for(auto row : c.y) for(auto &v : row) v = soft_shrink(v, c.q * sigma * input_variance);
 				#pragma omp critical
 				this->debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel

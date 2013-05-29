@@ -27,6 +27,7 @@ struct main_window : Gtk::ApplicationWindow {
 	shared_ptr<params<T>> p;
 	RefPtr<Pixbuf> input_image;
 	SpinButton q_value{Adjustment::create(p->force_q, 0, 100, 0.01, 0.1), 0, 3};
+	SpinButton var_value{Adjustment::create(1, 0, 10, 0.1, 1), 0, 2};
 
 	CheckButton debug_value{"Record debug log"};
 	CheckButton auto_range_value{"Display with adjusted range"};
@@ -239,6 +240,46 @@ struct main_window : Gtk::ApplicationWindow {
 				p->sigma = sigma_value->get_value();
 				validate();
 			});
+		}
+
+		options->attach(*manage(new HSeparator), 0, row++, 2, 1);
+
+		// Variance
+		{
+			auto method_label = manage(new Label("Variance", ALIGN_START));
+			options->attach(*method_label, 0, row, 1, 1);
+			auto var_box = manage(new HBox());
+			var_box->get_style_context()->add_class(GTK_STYLE_CLASS_LINKED);
+			options->attach(*var_box, 1, row++, 1, 1);
+			RadioButton::Group var_group;
+			auto var_fixed = manage(new RadioButton{var_group, "fixed"});
+			var_fixed->set_mode(false);
+			var_box->pack_start(*var_fixed);
+			auto var_mad = manage(new RadioButton{var_group, "median"});
+			var_mad->set_mode(false);
+			var_box->pack_start(*var_mad);
+
+			auto var_label = manage(new Label("Value", ALIGN_START));
+			options->attach(*var_label, 0, row, 1, 1);
+			options->attach(var_value, 1, row++, 1, 1);
+
+			if(p->input_variance >= 0) var_fixed->set_active(true);
+			else var_mad->set_active(true);
+
+			auto var_cb = [=]{
+				if(var_fixed->get_active()) {
+					p->input_variance = var_value.get_value();
+					var_value.set_sensitive(true);
+				} else {
+					p->input_variance = -1;
+					var_value.set_sensitive(false);
+				}
+				validate();
+			};
+			var_fixed->signal_toggled().connect(var_cb);
+			var_mad->signal_toggled().connect(var_cb);
+			var_value.signal_value_changed().connect(var_cb);
+			var_cb();
 		}
 
 		options->attach(*manage(new HSeparator), 0, row++, 2, 1);
@@ -493,6 +534,7 @@ struct main_window : Gtk::ApplicationWindow {
 				};
 			auto result = run_p->run(input);
 			q_value.set_value(run_p->q);
+			var_value.set_value(run_p->input_variance);
 			algorithm_done();
 		});
 	}
