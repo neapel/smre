@@ -54,6 +54,10 @@ struct chambolle_pock_cpu : public impl<T> {
 	  resolv(p.resolvent->cpu_runner(p.size)) {
 		if(p.use_fft) convolution = std::make_shared<cpu_fft_convolver<T>>(p.size);
 		else convolution = std::make_shared<cpu_sat_convolver<T>>(p.size);
+#if HAVE_OPENMP
+		if(this->profiler)
+			omp_set_num_threads(1);
+#endif
 	}
 
 	void update_kernels() {
@@ -103,6 +107,31 @@ struct chambolle_pock_cpu : public impl<T> {
 			c.q = q + c.shift_q;
 	}
 
+
+	bool current(const A &a, size_t s) {
+		if(this->current_cb) {
+			return this->current_cb(a, s);
+		}
+		return true;
+	}
+
+	void debug(const A &a, std::string d) {
+		if(this->debug_cb) {
+			#pragma omp critical
+			this->debug_cb(a, d);	
+		}
+	}
+
+	void profile_push(std::string name) {
+		if(this->profiler)
+			this->profiler->tic_cpu(name);
+	}
+
+	void profile_pop() {
+		if(this->profiler)
+			this->profiler->toc("");
+	}
+
 	virtual A run(const A &Y_) {
 		using namespace mimas;
 
@@ -113,10 +142,15 @@ struct chambolle_pock_cpu : public impl<T> {
 				Y[i0 + 20][i1 + p.size[1] - 40] = 0;		
 #endif
 
-		A x(Y), bar_x(Y), old_x(p.size), w(p.size), out(p.size);
+		profile_push("run");
+		profile_push("allocate");
+			A x(Y), bar_x(Y), old_x(p.size), w(p.size), out(p.size);
+		profile_pop();
 
 		if(!initialized) {
-			update_kernels();
+			profile_push("update kernels");
+				update_kernels();
+			profile_pop();
 			initialized = true;
 		}
 
@@ -137,53 +171,76 @@ struct chambolle_pock_cpu : public impl<T> {
 		sigma /= tau * total_norm;
 
 		// Repeat until good enough.
+		profile_push("iteration");
 		for(size_t n = 0 ; n < p.max_steps ; n++) {
+			profile_push("step");
 			// reset accumulator
-			fill(w, 0);
+			profile_push("reset w");
+				fill(w, 0);
+			profile_pop();
 			// transform bar_x for convolutions
-			const auto f_bar_x = convolution->prepare_image(bar_x);
+			profile_push("prepare bar_x");
+				const auto f_bar_x = convolution->prepare_image(bar_x);
+			profile_pop();
+			profile_push("constraints");
 			#pragma omp parallel for
 			for(size_t i = 0 ; i < constraints.size() ; i++) {
+				profile_push("kernel");
 				auto &c = constraints[i];
 				// convolve bar_x with kernel
-				A convolved(p.size);
-				convolution->conv(f_bar_x, c.k, convolved);
-				#pragma omp critical
-				this->debug(convolved, str(boost::format("convolved_%d") % i));
+				profile_push("k * bar_x");
+					A convolved(p.size);
+					convolution->conv(f_bar_x, c.k, convolved);
+				profile_pop();
+				debug(convolved, str(boost::format("convolved_%d") % i));
 				// calculate new y_i
-				convolved *= sigma;
-				c.y += convolved;
-				for(auto row : c.y) for(auto &v : row) v = soft_shrink(v, c.q * sigma * input_variance);
-				#pragma omp critical
-				this->debug(c.y, str(boost::format("y_%d") % i));
+				profile_push("soft_shrink");
+					convolved *= sigma;
+					c.y += convolved;
+					for(auto row : c.y) for(auto &v : row) v = soft_shrink(v, c.q * sigma * input_variance);
+				profile_pop();
+				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
-				const auto f_y = convolution->prepare_image(c.y);
-				convolution->conv(f_y, c.adj_k, convolved);
-				#pragma omp critical
-				this->debug(convolved, str(boost::format("adj_convolved_%d") % i));
+				profile_push("prepare y");
+					const auto f_y = convolution->prepare_image(c.y);
+				profile_pop();
+				profile_push("adj_k * y");
+					convolution->conv(f_y, c.adj_k, convolved);
+				profile_pop();
+				debug(convolved, str(boost::format("adj_convolved_%d") % i));
 				// accumulate
-				#pragma omp critical
-				w += convolved;
-				#pragma omp critical
-				this->debug(w, str(boost::format("w_%d") % i));
+				profile_push("accumulate w");
+					#pragma omp critical
+					w += convolved;
+				profile_pop();
+				profile_pop(/*kernel*/);
+				debug(w, str(boost::format("w_%d") % i));
 			}
+			profile_pop();
 			this->progress(double(n) / p.max_steps, str(boost::format("Chambolle-Pock step %d") % n));
 
-			old_x = x;
-			w *= tau; bar_x = x; bar_x -= Y; bar_x -= w;
-			this->debug(bar_x, "resolv_in");
-			resolv->evaluate(tau, bar_x, x);
-			x += Y;
-			this->debug(x, "resolv_out");
+			profile_push("resolvent");
+				old_x = x;
+				w *= tau; bar_x = x; bar_x -= Y; bar_x -= w;
+				debug(bar_x, "resolv_in");
+				resolv->evaluate(tau, bar_x, x);
+				x += Y;
+			profile_pop();
+			debug(x, "resolv_out");
 			const T theta = 1 / sqrt(1 + 2 * tau * resolv->gamma);
 			tau *= theta;
 			sigma /= theta;
-			bar_x = x; bar_x -= old_x; bar_x *= theta; bar_x += x;
-			this->debug(bar_x, "bar_x");
+			profile_push("bar_x");
+				bar_x = x; bar_x -= old_x; bar_x *= theta; bar_x += x;
+				debug(bar_x, "bar_x");
 
-			out = Y; out -= x;
-			if(!this->current(out, n)) break;
+				out = Y; out -= x;
+			profile_pop();
+			profile_pop(/*step*/);
+			if(!current(out, n)) break;
 		}
+		profile_pop();
+		profile_pop(/*run*/);
 		return out;
 	}
 };

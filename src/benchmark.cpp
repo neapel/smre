@@ -9,15 +9,17 @@ using namespace std;
 using namespace boost;
 using namespace boost::program_options;
 
-static bool run_cpu = true, run_gpu = true;
+static bool run_cpu = false, run_gpu = false, profile = false;
 static size_t runs = 10;
 
 
 template<template<class> class impl, class T>
 void run(params<T> a, multi_array<T, 2> in) {
 	watch w;
+	auto prof = make_shared<vex::profiler>(vex::current_context().queue());
 	try {
 		impl<T> c(a);
+		if(profile) c.profiler = prof;
 		c.run(in);
 		for(size_t i = 0 ; i < runs ; i++) {
 			w.start();
@@ -25,9 +27,13 @@ void run(params<T> a, multi_array<T, 2> in) {
 			w.stop();
 		}
 	} catch(...) {}
-	cout << '\t';
-	if(w.times.size() > 0) cout << w.median();
-	else cout << "nan";
+	if(profile) {
+		cout << *prof << endl;
+	} else {
+		cout << '\t';
+		if(w.times.size() > 0) cout << w.median();
+		else cout << "nan";	
+	}
 }
 
 
@@ -56,16 +62,17 @@ int main(int argc, char **argv) {
 	options_description desc("Options");
 	sizes_t sizes{128}, kernels{4};
 	desc.add_options()
-		("help", "show help")
-		("size", value(&sizes), "list of sizes to try.")
-		("kernels", value(&kernels), "list of kernel counts to try.")
-		("gpu", value(&run_gpu), "use gpu")
-		("cpu", value(&run_cpu), "use cpu")
-		("runs", value(&runs), "number of runs to measure");
+		("help,h", "show help")
+		("size,s", value(&sizes)->default_value(sizes), "list of sizes to try.")
+		("kernels,k", value(&kernels)->default_value(kernels), "list of kernel counts to try.")
+		("gpu", bool_switch(&run_gpu), "use gpu")
+		("cpu", bool_switch(&run_cpu), "use cpu")
+		("runs,r", value(&runs)->default_value(10), "number of runs to measure")
+		("profile,p", bool_switch(&profile), "create profile instead of benchmark");
 	variables_map vm;
 	store(parse_command_line(argc, argv, desc), vm);
 	notify(vm);
-	if(vm.count("help")) {
+	if(vm.count("help") || !(run_gpu | run_cpu)) {
 		cerr << desc << endl;
 		return EXIT_FAILURE;
 	}
@@ -74,10 +81,12 @@ int main(int argc, char **argv) {
 	vex::StaticContext<>::set(clctx);
 	cerr << "CL context:" << clctx << endl;
 
-	cout << "size\tkernels";
-	if(run_cpu) cout << "\tcpu";
-	if(run_gpu) cout << "\tgpu\tgpusat";
-	cout << endl;
+	if(!profile) {
+		cout << "size\tkernels";
+		if(run_cpu) cout << "\tcpu";
+		if(run_gpu) cout << "\tgpu\tgpusat";
+		cout << endl;
+	}
 
 	for(auto w : sizes)
 		for(auto k : kernels)

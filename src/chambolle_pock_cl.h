@@ -17,9 +17,12 @@ struct chambolle_pock_gpu : public impl<T> {
 	using impl<T>::q;
 
 	struct constraint {
+		// size of the box kernel.
 		size_t k_size;
 		std::shared_ptr<prepared_kernel> k, adj_k;
+		// y for this constraint
 		A y;
+		// specific q for this constraint.
 		T q, shift_q;
 
 		constraint(size_t k_size, size_t size_1d,
@@ -106,6 +109,16 @@ struct chambolle_pock_gpu : public impl<T> {
 		}
 	}
 
+	void profile_push(std::string name) {
+		if(this->profiler)
+			this->profiler->tic_cl(name);
+	}
+
+	void profile_pop() {
+		if(this->profiler)
+			this->profiler->toc("");
+	}
+
 	virtual boost::multi_array<T, 2> run(const boost::multi_array<T, 2> &Y__) {
 		auto Y_ = Y__;
 #if DEBUG_WATERMARK
@@ -118,18 +131,25 @@ struct chambolle_pock_gpu : public impl<T> {
 		else
 			input_variance = median_absolute_deviation(Y_);
 
+		profile_push("gpu run");
 		A Y(size_1d, Y_.data()), out(size_1d);
 		run(Y, out);
 		boost::multi_array<T, 2> out_(p.size);
 		copy(out, out_.data());
+		profile_pop();
 		return out_;
 	}
 
 	virtual void run(A &Y, A &out) {
-		A x(Y), bar_x(Y), old_x(size_1d), w(size_1d), convolved(size_1d);
+		profile_push("run");
+		profile_push("allocate");
+			A x(Y), bar_x(Y), old_x(size_1d), w(size_1d), convolved(size_1d);
+		profile_pop();
 
 		if(!initialized) {
+			profile_push("update kernels");
 			update_kernels();
+			profile_pop();
 			initialized = true;
 		}
 
@@ -145,45 +165,72 @@ struct chambolle_pock_gpu : public impl<T> {
 		sigma /= tau * total_norm;
 
 		// Repeat until good enough.
+		profile_push("iteration");
 		for(size_t n = 0 ; n < p.max_steps ; n++) {
+			profile_push("step");
 			// reset accumulator
-			w = 0.0f;
+			profile_push("reset w");
+				w = 0.0f;
+			profile_pop();
 			// transform bar_x for convolutions
-			const auto f_bar_x = convolution->prepare_image(bar_x);
+			profile_push("prepare bar_x");
+				const auto f_bar_x = convolution->prepare_image(bar_x);
+			profile_pop();
+			profile_push("constraints");
 			for(size_t i = 0 ; i < constraints.size() ; i++) {
+				profile_push("kernel");
 				auto &c = constraints[i];
 				// convolve bar_x with kernel
-				convolution->conv(f_bar_x, c.k, convolved);
+				profile_push("k * bar_x");
+					convolution->conv(f_bar_x, c.k, convolved);
+				profile_pop();
 				debug(convolved, str(boost::format("convolved_%d") % i));
 				// calculate new y_i
-				c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma * input_variance);
+				profile_push("soft_shrink");
+					c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma * input_variance);
+				profile_pop();
 				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
-				const auto f_y = convolution->prepare_image(c.y);
-				convolution->conv(f_y, c.adj_k, convolved);
+				profile_push("prepare y");
+					const auto f_y = convolution->prepare_image(c.y);
+				profile_pop();
+				profile_push("adj_k * y");
+					convolution->conv(f_y, c.adj_k, convolved);
+				profile_pop();
 				debug(convolved, str(boost::format("adj_convolved_%d") % i));
 				// accumulate
-				w += convolved;
+				profile_push("accumulate w");
+					w += convolved;
+				profile_pop();
+				profile_pop(/*kernel*/);
 				debug(w, str(boost::format("w_%d") % i));
 				this->progress(double(n * constraints.size() + i) / (p.max_steps * constraints.size()),
 					str(boost::format("Chambolle-Pock step %d") % n));
 			}
+			profile_pop();
 
-			old_x = x;
-			bar_x = x - Y - w*tau;
-			debug(bar_x, "resolv_in");
-			resolv->evaluate(tau, bar_x, x);
-			x += Y;
+			profile_push("resolvent");
+				old_x = x;
+				bar_x = x - Y - w*tau;
+				debug(bar_x, "resolv_in");
+				resolv->evaluate(tau, bar_x, x);
+				x += Y;
+			profile_pop();
 			debug(x, "resolv_out");
 			const T theta = 1 / sqrt(1 + 2 * tau * resolv->gamma);
 			tau *= theta;
 			sigma /= theta;
-			bar_x = x + (x - old_x) * theta;
-			debug(bar_x, "bar_x");
+			profile_push("bar_x");
+				bar_x = x + (x - old_x) * theta;
+				debug(bar_x, "bar_x");
 
-			out = Y - x;
+				out = Y - x;
+			profile_pop();
+			profile_pop(/*step*/);
 			if(!current(out, n)) break;
 		}
+		profile_pop();
+		profile_pop(/*run*/);
 	}
 
 	#undef debug

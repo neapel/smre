@@ -74,6 +74,8 @@ struct impl {
 	std::function<bool(const boost::multi_array<T, 2> &, size_t step)> current_cb{nullptr};
 	// debug.
 	std::function<void(const boost::multi_array<T, 2> &, std::string desc)> debug_cb{nullptr};
+	// profiler to use, if any.
+	std::shared_ptr<vex::profiler> profiler{nullptr};
 
 	impl(const params<T> &p) : p(p) {}
 	virtual ~impl() {}
@@ -82,15 +84,6 @@ struct impl {
 
 	virtual void progress(double q, std::string d) {
 		if(progress_cb) progress_cb(q, d);
-	}
-
-	virtual bool current(const boost::multi_array<T,2> &a, size_t s) {
-		if(current_cb) return current_cb(a, s);
-		return true;
-	}
-
-	virtual void debug(const boost::multi_array<T,2> &a, std::string d) {
-		if(debug_cb) debug_cb(a, d);
 	}
 
 protected:
