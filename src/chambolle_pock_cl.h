@@ -59,7 +59,7 @@ struct chambolle_pock_gpu : public impl<T> {
 			auto prep_k = convolution->prepare_kernel(k_size, false);
 			auto adj_prep_k = convolution->prepare_kernel(k_size, true);
 			constraints.emplace_back(k_size, size_1d, prep_k, adj_prep_k);
-			total_norm += k_size / M_SQRT2;
+			total_norm += k_size * k_size / 2;
 		}
 		if(p.penalized_scan)
 			for(auto &c : constraints)
