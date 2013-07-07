@@ -44,7 +44,7 @@ struct impl;
 template<class T>
 struct params {
 	size_t max_steps = 10, monte_carlo_steps = 1000;
-	T alpha = 0.5, tau = 1000, sigma = 0.1, input_variance = -1, force_q = -1;
+	T alpha = 0.5, tau = 1000, sigma = 0.1, input_stddev = -1, force_q = -1;
 	bool no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true, use_gpu = false;
 	sizes_t kernel_sizes;
 	size2_t size;
@@ -66,7 +66,7 @@ struct params {
 template<class T>
 struct impl {
 	const params<T> &p;
-	T q, input_variance;
+	T q, input_stddev;
 
 	// current progress [0:1]
 	std::function<void(double, std::string desc)> progress_cb{nullptr};

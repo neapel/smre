@@ -13,7 +13,7 @@ struct chambolle_pock_gpu : public impl<T> {
 	typedef vex::vector<T> A;
 
 	using impl<T>::p;
-	using impl<T>::input_variance;
+	using impl<T>::input_stddev;
 	using impl<T>::q;
 
 	struct constraint {
@@ -126,10 +126,10 @@ struct chambolle_pock_gpu : public impl<T> {
 			for(size_t i1 = 0 ; i1 < 20 ; i1++)
 				Y_[i0 + 20][i1 + 20] = 0;
 #endif
-		if(p.input_variance >= 0)
-			input_variance = p.input_variance;
+		if(p.input_stddev >= 0)
+			input_stddev = p.input_stddev;
 		else
-			input_variance = median_absolute_deviation(Y_);
+			input_stddev = median_absolute_deviation(Y_);
 
 		profile_push("gpu run");
 		A Y(size_1d, Y_.data()), out(size_1d);
@@ -187,7 +187,7 @@ struct chambolle_pock_gpu : public impl<T> {
 				debug(convolved, str(boost::format("convolved_%d") % i));
 				// calculate new y_i
 				profile_push("soft_shrink");
-					c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma * input_variance);
+					c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma * input_stddev);
 				profile_pop();
 				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel

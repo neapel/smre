@@ -27,7 +27,7 @@ struct main_window : Gtk::ApplicationWindow {
 	shared_ptr<params<T>> p;
 	RefPtr<Pixbuf> input_image;
 	SpinButton q_value{Adjustment::create(p->force_q, 0, 100, 0.01, 0.1), 0, 3};
-	SpinButton var_value{Adjustment::create(1, 0, 10, 0.1, 1), 0, 2};
+	SpinButton stddev_value{Adjustment::create(1, 0, 10, 0.1, 1), 0, 2};
 
 	CheckButton debug_value{"Record debug log"};
 	CheckButton auto_range_value{"Display with adjusted range"};
@@ -246,40 +246,41 @@ struct main_window : Gtk::ApplicationWindow {
 
 		// Variance
 		{
-			auto method_label = manage(new Label("Variance", ALIGN_START));
+			auto method_label = manage(new Label("Std. dev. (σ)", ALIGN_START));
 			options->attach(*method_label, 0, row, 1, 1);
-			auto var_box = manage(new HBox());
-			var_box->get_style_context()->add_class(GTK_STYLE_CLASS_LINKED);
-			options->attach(*var_box, 1, row++, 1, 1);
-			RadioButton::Group var_group;
-			auto var_fixed = manage(new RadioButton{var_group, "fixed"});
-			var_fixed->set_mode(false);
-			var_box->pack_start(*var_fixed);
-			auto var_mad = manage(new RadioButton{var_group, "median"});
-			var_mad->set_mode(false);
-			var_box->pack_start(*var_mad);
+			auto stddev_box = manage(new HBox());
+			stddev_box->get_style_context()->add_class(GTK_STYLE_CLASS_LINKED);
+			options->attach(*stddev_box, 1, row++, 1, 1);
+			RadioButton::Group stddev_group;
+			auto stddev_fixed = manage(new RadioButton{stddev_group, "fixed"});
+			stddev_fixed->set_mode(false);
+			stddev_box->pack_start(*stddev_fixed);
+			auto stddev_mad = manage(new RadioButton{stddev_group, "median"});
+			stddev_mad->set_mode(false);
+			stddev_box->pack_start(*stddev_mad);
 
-			auto var_label = manage(new Label("Value", ALIGN_START));
-			options->attach(*var_label, 0, row, 1, 1);
-			options->attach(var_value, 1, row++, 1, 1);
+			auto stddev_label = manage(new Label("Value", ALIGN_START));
+			options->attach(*stddev_label, 0, row, 1, 1);
+			options->attach(stddev_value, 1, row++, 1, 1);
 
-			if(p->input_variance >= 0) var_fixed->set_active(true);
-			else var_mad->set_active(true);
+			stddev_value.set_value(p->input_stddev);
+			if(p->input_stddev >= 0) stddev_fixed->set_active(true);
+			else stddev_mad->set_active(true);
 
-			auto var_cb = [=]{
-				if(var_fixed->get_active()) {
-					p->input_variance = var_value.get_value();
-					var_value.set_sensitive(true);
+			auto stddev_cb = [=]{
+				if(stddev_fixed->get_active()) {
+					p->input_stddev = stddev_value.get_value();
+					stddev_value.set_sensitive(true);
 				} else {
-					p->input_variance = -1;
-					var_value.set_sensitive(false);
+					p->input_stddev = -1;
+					stddev_value.set_sensitive(false);
 				}
 				validate();
 			};
-			var_fixed->signal_toggled().connect(var_cb);
-			var_mad->signal_toggled().connect(var_cb);
-			var_value.signal_value_changed().connect(var_cb);
-			var_cb();
+			stddev_fixed->signal_toggled().connect(stddev_cb);
+			stddev_mad->signal_toggled().connect(stddev_cb);
+			stddev_value.signal_value_changed().connect(stddev_cb);
+			stddev_cb();
 		}
 
 		options->attach(*manage(new HSeparator), 0, row++, 2, 1);
@@ -534,7 +535,7 @@ struct main_window : Gtk::ApplicationWindow {
 				};
 			auto result = run_p->run(input);
 			q_value.set_value(run_p->q);
-			var_value.set_value(run_p->input_variance);
+			stddev_value.set_value(run_p->input_stddev);
 			algorithm_done();
 		});
 	}
@@ -610,8 +611,8 @@ struct app_t : Gtk::Application {
 				"Step size τ (large)")
 			("sigma,s", value(&p->sigma)->default_value(p->sigma)->value_name("<float>"),
 				"Step size σ (small)")
-			("variance,v", value(&p->input_variance)->default_value(p->input_variance)->value_name("<float>"),
-				"Set the input image variance explicitly instead of guessing it"); // TODO
+			("std", value(&p->input_stddev)->default_value(p->input_stddev)->value_name("<float>"),
+				"Set the input image standard deviation explicitly instead of guessing it");
 
 		options_description q_desc("Threshold (q)");
 		q_desc.add_options()

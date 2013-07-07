@@ -20,7 +20,7 @@ struct chambolle_pock_cpu : public impl<T> {
 	typedef boost::multi_array<T, 2> A;
 
 	using impl<T>::p;
-	using impl<T>::input_variance;
+	using impl<T>::input_stddev;
 	using impl<T>::q;
 
 	struct constraint {
@@ -154,10 +154,10 @@ struct chambolle_pock_cpu : public impl<T> {
 			initialized = true;
 		}
 
-		if(p.input_variance >= 0)
-			input_variance = p.input_variance;
+		if(p.input_stddev >= 0)
+			input_stddev = p.input_stddev;
 		else
-			input_variance = median_absolute_deviation(Y_);
+			input_stddev = median_absolute_deviation(Y_);
 
 		this->debug(x, "x_in");
 		for(auto &c : constraints) {
@@ -197,7 +197,7 @@ struct chambolle_pock_cpu : public impl<T> {
 				profile_push("soft_shrink");
 					convolved *= sigma;
 					c.y += convolved;
-					for(auto row : c.y) for(auto &v : row) v = soft_shrink(v, c.q * sigma * input_variance);
+					for(auto row : c.y) for(auto &v : row) v = soft_shrink(v, c.q * sigma * input_stddev);
 				profile_pop();
 				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
