@@ -43,8 +43,8 @@ struct impl;
 
 template<class T>
 struct params {
-	size_t max_steps = 10, monte_carlo_steps = 1000;
-	T alpha = 0.5, tau = 1000, sigma = 0.1, input_stddev = -1, force_q = -1;
+	size_t max_steps = 2000, monte_carlo_steps = 1000;
+	T alpha = 0.5, tau = 1000, sigma = 1, input_stddev = -1, force_q = -1, tolerance = 1000;
 	bool no_cache = false, penalized_scan = false, dump_mc = false, use_fft = true, use_gpu = false;
 	sizes_t kernel_sizes;
 	size2_t size;

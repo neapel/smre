@@ -56,6 +56,27 @@ typename A::element sum(const A &a) {
 	return x;
 }
 
+/** Returns the 1-norm: sum(abs(a)) */
+template<class A>
+typename A::element norm_1(const A &a) {
+	typename A::element x = 0;
+	mimas::multi_apply(const_cast<A&>(a), [&x](const typename A::element &e){ x += std::abs(e); });
+	return x;
+}
+
+/** Returns the infinity-norm: max(abs(a)) */
+template<class A>
+typename A::element norm_inf(const A &a) {
+	typename A::element x = 0;
+	mimas::multi_apply(const_cast<A&>(a), [&x](const typename A::element &e){
+		auto a = std::abs(e);
+		if(a > x) x = a;
+	});
+	return x;
+}
+
+
+
 
 /** Returns true if there are no unused bytes in the array's memory */
 template<class A>

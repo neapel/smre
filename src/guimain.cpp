@@ -213,10 +213,20 @@ struct main_window : Gtk::ApplicationWindow {
 		{
 			auto max_steps_label = manage(new Label("Max. steps", ALIGN_START));
 			options->attach(*max_steps_label, 0, row, 1, 1);
-			auto max_steps_value = manage(new SpinButton{Adjustment::create(p->max_steps, 1, 1000)});
+			auto max_steps_value = manage(new SpinButton{Adjustment::create(p->max_steps, 1, 10000)});
 			options->attach(*max_steps_value, 1, row++, 1, 1);
 			max_steps_value->signal_value_changed().connect([=]{
 				p->max_steps = max_steps_value->get_value();
+				validate();
+			});
+
+			auto tolerance_label = manage(new Label("Tolerance⁻¹", ALIGN_START));
+			tolerance_label->set_use_markup();
+			options->attach(*tolerance_label, 0, row, 1, 1);
+			auto tolerance_value = manage(new SpinButton{Adjustment::create(p->tolerance, 0, 100000, 10, 100), 100, 0});
+			options->attach(*tolerance_value, 1, row++, 1, 1);
+			tolerance_value->signal_value_changed().connect([=]{
+				p->tolerance = tolerance_value->get_value();
 				validate();
 			});
 		}
@@ -607,6 +617,8 @@ struct app_t : Gtk::Application {
 				"Resolvent function to use, either “L2” for L₂ or “H1 <delta>” for H₁")
 			("max-steps,#", value(&p->max_steps)->default_value(p->max_steps)->value_name("<int>"),
 				"Maximum number of optimization steps")
+			("tolerance,e", value(&p->tolerance)->default_value(p->tolerance)->value_name("<float>"),
+				"Stop when inverse relative change larger than this value")
 			("tau,t", value(&p->tau)->default_value(p->tau)->value_name("<float>"),
 				"Step size τ (large)")
 			("sigma,s", value(&p->sigma)->default_value(p->sigma)->value_name("<float>"),

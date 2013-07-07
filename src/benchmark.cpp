@@ -64,6 +64,8 @@ int main(int argc, char **argv) {
 	params<T> base_p;
 	base_p.force_q = 3;
 	base_p.input_stddev = 1;
+	base_p.tolerance = -1;
+	base_p.max_steps = 100;
 
 	options_description desc("Options");
 	sizes_t sizes{128}, kernels{4};

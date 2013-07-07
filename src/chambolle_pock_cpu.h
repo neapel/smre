@@ -90,8 +90,7 @@ struct chambolle_pock_cpu : public impl<T> {
 				auto f_data = convolution->prepare_image(data);
 				for(size_t j = 0 ; j < constraints.size() ; j++) {
 					convolution->conv(f_data, constraints[j].k, convolved);
-					auto norm_inf = max(abs(convolved));
-					auto k_q = norm_inf - constraints[j].shift_q;
+					auto k_q = norm_inf(convolved) - constraints[j].shift_q;
 					#pragma omp critical
 					k_qs[j].push_back(k_q);
 				}
@@ -237,7 +236,13 @@ struct chambolle_pock_cpu : public impl<T> {
 				out = Y; out -= x;
 			profile_pop();
 			profile_pop(/*step*/);
+
 			if(!current(out, n)) break;
+
+			if(n > 1 && p.tolerance > 0) {
+				const T ch = norm_1(x) / norm_1(x - old_x);
+				if(ch >= p.tolerance) break;
+			}
 		}
 		profile_pop();
 		profile_pop(/*run*/);

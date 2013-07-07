@@ -37,6 +37,9 @@ struct chambolle_pock_gpu : public impl<T> {
 		"if(prm1 > prm2) return prm1 - prm2;"
 		"return 0;");
 
+	const vex::Reductor<T, vex::MAX> max;
+	const vex::Reductor<T, vex::SUM> sum;
+
 	const size_t size_1d;
 	T total_norm;
 	std::vector<constraint> constraints;
@@ -67,10 +70,17 @@ struct chambolle_pock_gpu : public impl<T> {
 		calc_q();
 	}
 
+	T norm_inf(const A &a) {
+		return max(fabs(a));
+	}
+
+	T norm_1(const A &a) {
+		return sum(fabs(a));
+	}
+
 	void calc_q() {
 		// If needed, calculate `q/sigma` value.
 		q = this->cached_q([&](std::vector<std::vector<T>> &k_qs){
-			const vex::Reductor<T, vex::MAX> max;
 			A data(size_1d), convolved(size_1d);
 			vex::RandomNormal<T> random;
 			std::random_device dev;
@@ -80,8 +90,7 @@ struct chambolle_pock_gpu : public impl<T> {
 				auto f_data = convolution->prepare_image(data);
 				for(size_t j = 0 ; j < constraints.size() ; j++) {
 					convolution->conv(f_data, constraints[j].k, convolved);
-					auto norm_inf = max(fabs(convolved));
-					auto k_q = norm_inf - constraints[j].shift_q;
+					auto k_q = norm_inf(convolved) - constraints[j].shift_q;
 					k_qs[j].push_back(k_q);
 				}
 				this->progress(double(i) / p.monte_carlo_steps, "Monte Carlo simulation for q");
@@ -227,7 +236,13 @@ struct chambolle_pock_gpu : public impl<T> {
 				out = Y - x;
 			profile_pop();
 			profile_pop(/*step*/);
+
 			if(!current(out, n)) break;
+
+			if(n > 1 && p.tolerance > 0) {
+				const T ch = norm_1(x) / norm_1(x - old_x);
+				if(ch >= p.tolerance) break;
+			}
 		}
 		profile_pop();
 		profile_pop(/*run*/);
