@@ -169,11 +169,11 @@ struct chambolle_pock_gpu : public impl<T> {
 		for(size_t n = 0 ; n < p.max_steps ; n++) {
 			profile_push("step");
 			// reset accumulator
-			profile_push("reset w");
+			profile_push("(a) reset w");
 				w = 0.0f;
 			profile_pop();
 			// transform bar_x for convolutions
-			profile_push("prepare bar_x");
+			profile_push("(b) prepare bar_x");
 				const auto f_bar_x = convolution->prepare_image(bar_x);
 			profile_pop();
 			profile_push("constraints");
@@ -181,25 +181,25 @@ struct chambolle_pock_gpu : public impl<T> {
 				profile_push("kernel");
 				auto &c = constraints[i];
 				// convolve bar_x with kernel
-				profile_push("k * bar_x");
+				profile_push("(c) k * bar_x");
 					convolution->conv(f_bar_x, c.k, convolved);
 				profile_pop();
 				debug(convolved, str(boost::format("convolved_%d") % i));
 				// calculate new y_i
-				profile_push("soft_shrink");
+				profile_push("(d) soft_shrink");
 					c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma * input_stddev);
 				profile_pop();
 				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
-				profile_push("prepare y");
+				profile_push("(e) prepare y");
 					const auto f_y = convolution->prepare_image(c.y);
 				profile_pop();
-				profile_push("adj_k * y");
+				profile_push("(f) adj_k * y");
 					convolution->conv(f_y, c.adj_k, convolved);
 				profile_pop();
 				debug(convolved, str(boost::format("adj_convolved_%d") % i));
 				// accumulate
-				profile_push("accumulate w");
+				profile_push("(g) accumulate w");
 					w += convolved;
 				profile_pop();
 				profile_pop(/*kernel*/);
@@ -209,7 +209,7 @@ struct chambolle_pock_gpu : public impl<T> {
 			}
 			profile_pop();
 
-			profile_push("resolvent");
+			profile_push("(h) resolvent");
 				old_x = x;
 				bar_x = x - Y - w*tau;
 				debug(bar_x, "resolv_in");
@@ -220,7 +220,7 @@ struct chambolle_pock_gpu : public impl<T> {
 			const T theta = 1 / sqrt(1 + 2 * tau * resolv->gamma);
 			tau *= theta;
 			sigma /= theta;
-			profile_push("bar_x");
+			profile_push("(i) bar_x");
 				bar_x = x + (x - old_x) * theta;
 				debug(bar_x, "bar_x");
 

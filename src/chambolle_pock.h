@@ -75,7 +75,7 @@ struct impl {
 	// debug.
 	std::function<void(const boost::multi_array<T, 2> &, std::string desc)> debug_cb{nullptr};
 	// profiler to use, if any.
-	std::shared_ptr<vex::profiler> profiler{nullptr};
+	std::shared_ptr<vex::profiler<>> profiler{nullptr};
 
 	impl(const params<T> &p) : p(p) {}
 	virtual ~impl() {}

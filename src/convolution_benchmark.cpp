@@ -2,7 +2,6 @@
 #include <boost/program_options.hpp>
 #include "constraint_parser.h"
 #include "convolution.h"
-#include "watch.h"
 #include "multi_array_operators.h"
 
 using namespace std;
@@ -20,33 +19,33 @@ vex::Context ctx(vex::Filter::Count(1));
 template<class Conv>
 void conv(size_t sz, const typename Conv::A &x, typename Conv::A &y, size_t h) {
 	auto c = make_shared<Conv>(size2_t{{sz, sz}});
-	watch w_prep, w_img, w_conv, w_total;
+	vex::stopwatch<> w_prep, w_img, w_conv, w_total;
 	ctx.queue()[0].finish();
 	for(size_t ir = 0 ; ir < runs ; ir++) {
-		w_total.start();
+		w_total.tic();
 
-		w_prep.start();
+		w_prep.tic();
 		auto k = c->prepare_kernel(h, false);
 		ctx.queue()[0].finish();
-		w_prep.stop();
+		w_prep.toc();
 
-		w_img.start();
+		w_img.tic();
 		auto i = c->prepare_image(x);
 		ctx.queue()[0].finish();
-		w_img.stop();
+		w_img.toc();
 
-		w_conv.start();
+		w_conv.tic();
 		c->conv(i, k, y);
 		ctx.queue()[0].finish();
-		w_conv.stop();
+		w_conv.toc();
 
-		w_total.stop();
+		w_total.toc();
 	}
 	const size_t s = sz * sz;
-	cout << '\t' << (s / w_prep.median()) << '\t' << w_prep.rel_error()
-	     << '\t' << (s / w_img.median()) << '\t' << w_img.rel_error()
-		  << '\t' << (s / w_conv.median()) << '\t' << w_conv.rel_error()
-		  << '\t' << (s / w_total.median()) << '\t' << w_total.rel_error();
+	cout << '\t' << (s / w_prep.average())
+	     << '\t' << (s / w_img.average())
+		  << '\t' << (s / w_conv.average())
+		  << '\t' << (s / w_total.average());
 }
 
 template<class Conv>
@@ -63,7 +62,7 @@ void bench_gpu(size_t sz, size_t hs) {
 		x = 1;
 		conv<Conv>(sz, x, y, hs);
 	} catch(...){
-		cout << "\tnan\tnan\tnan\tnan\tnan\tnan\tnan\tnan";
+		cout << "\tnan\tnan\tnan\tnan";
 	}
 }
 
@@ -73,16 +72,17 @@ void bench_gpu_lin(size_t sz) {
 		x = 1;
 		x += 1;
 		ctx.queue()[0].finish();
-		watch w;
+		vex::stopwatch<> w;
 		for(size_t i = 0 ; i < runs ; i++) {
-			w.start();
+			ctx.queue()[0].finish();
+			w.tic();
 			x += 1;
 			ctx.queue()[0].finish();
-			w.stop();
+			w.toc();
 		}
-		cout << '\t' << (sz * sz / w.median()) << '\t' << w.rel_error();
+		cout << '\t' << (sz * sz / w.average());
 	} catch(...) {
-		cout << "\tnan\tnan";
+		cout << "\tnan";
 	}
 }
 
@@ -111,11 +111,10 @@ int main(int argc, char **argv) {
 	vex::StaticContext<>::set(ctx);
 
 	cout << "size\tbox";
-	if(run_gpu && run_fft) cout << "\tgpufftkprep\tgpufftkpreperr\tgpufftiprep\tgpufftipreperr\tgpufftconv\tgpufftconverr\tgpuffttotal\tgpuffttotalerr";
-	if(run_gpu && run_sat) cout << "\tgpusatkprep\tgpusatkpreperr\tgpusatiprep\tgpusatipreperr\tgpusatconv\tgpusatconverr\tgpusattotal\tgpusattotalerr";
-	if(run_cpu && run_fft) cout << "\tcpufftkprep\tcpufftkpreperr\tcpufftiprep\tcpufftipreperr\tcpufftconv\tcpufftconverr\tcpuffttotal\tcpuffttotalerr";
-	//if(run_cpu && run_sat) cout << "\tcpusatkprep\tcpusatkpreperr\tcpusatiprep\tcpusatipreperr\tcpusatconv\tcpusatconverr\tcpusattotal\tcpusattotalerr";
-	if(run_gpu) cout << "\tgpulin\tgpulinerr";
+	if(run_gpu && run_fft) cout << "\tgpufftkprep\tgpufftiprep\tgpufftconv\tgpuffttotal";
+	if(run_gpu && run_sat) cout << "\tgpusatkprep\tgpusatiprep\tgpusatconv\tgpusattotal";
+	if(run_cpu && run_fft) cout << "\tcpufftkprep\tcpufftiprep\tcpufftconv\tcpuffttotal";
+	if(run_gpu           ) cout << "\tgpulin";
 	cout << endl;
 
 	for(auto sz : sizes) {
@@ -124,8 +123,7 @@ int main(int argc, char **argv) {
 			if(run_gpu && run_fft) bench_gpu<gpu_fft_convolver<T>>(sz, h);
 			if(run_gpu && run_sat) bench_gpu<gpu_sat_convolver<T>>(sz, h);
 			if(run_cpu && run_fft) bench_cpu<cpu_fft_convolver<T>>(sz, h);
-			//if(run_cpu && run_sat) bench_cpu<cpu_sat_convolver<T>>(sz, h);
-			if(run_gpu) bench_gpu_lin(sz);
+			if(run_gpu           ) bench_gpu_lin(sz);
 			cout << endl;
 		}
 	}

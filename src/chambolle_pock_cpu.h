@@ -175,11 +175,11 @@ struct chambolle_pock_cpu : public impl<T> {
 		for(size_t n = 0 ; n < p.max_steps ; n++) {
 			profile_push("step");
 			// reset accumulator
-			profile_push("reset w");
+			profile_push("(a) reset w");
 				fill(w, 0);
 			profile_pop();
 			// transform bar_x for convolutions
-			profile_push("prepare bar_x");
+			profile_push("(b) prepare bar_x");
 				const auto f_bar_x = convolution->prepare_image(bar_x);
 			profile_pop();
 			profile_push("constraints");
@@ -188,28 +188,28 @@ struct chambolle_pock_cpu : public impl<T> {
 				profile_push("kernel");
 				auto &c = constraints[i];
 				// convolve bar_x with kernel
-				profile_push("k * bar_x");
+				profile_push("(c) k * bar_x");
 					A convolved(p.size);
 					convolution->conv(f_bar_x, c.k, convolved);
 				profile_pop();
 				debug(convolved, str(boost::format("convolved_%d") % i));
 				// calculate new y_i
-				profile_push("soft_shrink");
+				profile_push("(d) soft_shrink");
 					convolved *= sigma;
 					c.y += convolved;
 					for(auto row : c.y) for(auto &v : row) v = soft_shrink(v, c.q * sigma * input_stddev);
 				profile_pop();
 				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
-				profile_push("prepare y");
+				profile_push("(e) prepare y");
 					const auto f_y = convolution->prepare_image(c.y);
 				profile_pop();
-				profile_push("adj_k * y");
+				profile_push("(f) adj_k * y");
 					convolution->conv(f_y, c.adj_k, convolved);
 				profile_pop();
 				debug(convolved, str(boost::format("adj_convolved_%d") % i));
 				// accumulate
-				profile_push("accumulate w");
+				profile_push("(g) accumulate w");
 					#pragma omp critical
 					w += convolved;
 				profile_pop();
@@ -219,7 +219,7 @@ struct chambolle_pock_cpu : public impl<T> {
 			profile_pop();
 			this->progress(double(n) / p.max_steps, str(boost::format("Chambolle-Pock step %d") % n));
 
-			profile_push("resolvent");
+			profile_push("(h) resolvent");
 				old_x = x;
 				w *= tau; bar_x = x; bar_x -= Y; bar_x -= w;
 				debug(bar_x, "resolv_in");
@@ -230,7 +230,7 @@ struct chambolle_pock_cpu : public impl<T> {
 			const T theta = 1 / sqrt(1 + 2 * tau * resolv->gamma);
 			tau *= theta;
 			sigma /= theta;
-			profile_push("bar_x");
+			profile_push("(i) bar_x");
 				bar_x = x; bar_x -= old_x; bar_x *= theta; bar_x += x;
 				debug(bar_x, "bar_x");
 
