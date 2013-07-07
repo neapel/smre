@@ -30,6 +30,7 @@ struct main_window : Gtk::ApplicationWindow {
 	SpinButton stddev_value{Adjustment::create(1, 0, 10, 0.1, 1), 0, 2};
 
 	CheckButton debug_value{"Record debug log"};
+	CheckButton live_display_value{"Show output after each step"};
 	CheckButton auto_range_value{"Display with adjusted range"};
 
 	ProgressBar progress;
@@ -423,6 +424,8 @@ struct main_window : Gtk::ApplicationWindow {
 		{
 			debug_value.set_active(debug);
 			options->attach(debug_value, 0, row++, 2, 1);
+			live_display_value.set_active(true);
+			options->attach(live_display_value, 0, row++, 2, 1);
 			options->attach(auto_range_value, 0, row++, 2, 1);
 		}
 
@@ -531,11 +534,13 @@ struct main_window : Gtk::ApplicationWindow {
 				update_progress();
 			};
 			run_p->current_cb = [=](const boost::multi_array<T,2> &a, size_t s) {
-				{
-					Threads::Mutex::Lock lock(mutex);
-					current_output = multi_array_to_pixbuf(a, auto_range_value.get_active());
+				if(live_display_value.get_active()) {
+					{
+						Threads::Mutex::Lock lock(mutex);
+						current_output = multi_array_to_pixbuf(a, auto_range_value.get_active());
+					}
+					update_output();
 				}
-				update_output();
 				return continue_run;
 			};
 			if(debug_value.get_active())
@@ -546,6 +551,8 @@ struct main_window : Gtk::ApplicationWindow {
 			auto result = run_p->run(input);
 			q_value.set_value(run_p->q);
 			stddev_value.set_value(run_p->input_stddev);
+			current_output = multi_array_to_pixbuf(result, auto_range_value.get_active());
+			update_output();
 			algorithm_done();
 		});
 	}
