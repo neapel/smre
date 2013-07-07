@@ -88,18 +88,26 @@ struct impl {
 
 protected:
 	T cached_q(std::function<void(std::vector<std::vector<T>>&)> calc) {
-		if(p.force_q >= 0) return p.force_q;
-
-		static const auto cache_dir = "cache/";
 		using namespace std;
 		using namespace boost::filesystem;
+		if(p.force_q >= 0) return p.force_q;
+
 		// filename from kernel stack
-		ostringstream ss; ss << cache_dir << p.size[0] << 'x' << p.size[1];
-		for(auto s : p.kernel_sizes)
-			ss << '+' << s;
-		if(p.penalized_scan) ss << "-penalized";
-		auto target = ss.str();
+		ostringstream ss_desc;
+		ss_desc << p.size[0] << 'x' << p.size[1] << " box";
+		for(auto s : p.kernel_sizes) ss_desc << ' ' << s;
+		if(p.penalized_scan) ss_desc << " penalized";
+		const auto desc = ss_desc.str();
+		// use hash to avoid overlong file names
+		static const hash<string> hash_f;
+		const size_t id = hash_f(desc);
+
+		static const auto cache_dir = "cache/";
 		create_directories(cache_dir);
+		ostringstream ss_target;
+		ss_target << cache_dir << id << ".dat";
+		const auto target = ss_target.str();
+
 		vector<T> qs;
 		if(p.no_cache || !exists(target)) {
 			// simulate. k_qs[kernel][runs]
@@ -126,10 +134,12 @@ protected:
 			sort(qs.begin(), qs.end());
 			// write raw output.
 			ofstream f(target);
+			f << "# " << desc << '\n';
 			for(auto x : qs) f << x << '\n';
 		} else {
 			// read
 			ifstream f(target);
+			string _desc; getline(f, _desc);
 			for(T value ; f >> value ; qs.push_back(value));
 			sort(qs.begin(), qs.end());
 		}
