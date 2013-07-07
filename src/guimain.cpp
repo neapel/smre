@@ -26,7 +26,7 @@ typedef float T;
 struct main_window : Gtk::ApplicationWindow {
 	shared_ptr<params<T>> p;
 	RefPtr<Pixbuf> input_image;
-	SpinButton q_value{Adjustment::create(p->force_q, 0, 100, 0.01, 0.1), 0, 3};
+	SpinButton q_value{Adjustment::create(p->force_q, 0, 100, 0.1, 1), 0, 3};
 	SpinButton stddev_value{Adjustment::create(1, 0, 10, 0.1, 1), 0, 2};
 
 	CheckButton debug_value{"Record debug log"};
@@ -69,6 +69,8 @@ struct main_window : Gtk::ApplicationWindow {
 	Dispatcher update_progress, update_output, algorithm_done;
 
 	main_window(shared_ptr<params<T>> p, bool debug, bool gpu_enabled) : p(p) {
+		set_title("SMRE");
+
 		// Main layout
 		auto vbox = manage(new VBox());
 		add(*vbox);
@@ -212,7 +214,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 		// Stop condition
 		{
-			auto max_steps_label = manage(new Label("Max. steps", ALIGN_START));
+			auto max_steps_label = manage(new Label("Max steps", ALIGN_START));
 			options->attach(*max_steps_label, 0, row, 1, 1);
 			auto max_steps_value = manage(new SpinButton{Adjustment::create(p->max_steps, 1, 10000)});
 			options->attach(*max_steps_value, 1, row++, 1, 1);
@@ -234,7 +236,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 		// Step sizes
 		{
-			auto tau_label = manage(new Label("Step (τ)", ALIGN_START));
+			auto tau_label = manage(new Label("Step (τ₀)", ALIGN_START));
 			options->attach(*tau_label, 0, row, 1, 1);
 			auto tau_value = manage(new SpinButton{Adjustment::create(p->tau, 0, 10000, 10, 100), 0, 0});
 			options->attach(*tau_value, 1, row++, 1, 1);
@@ -243,7 +245,7 @@ struct main_window : Gtk::ApplicationWindow {
 				validate();
 			});
 
-			auto sigma_label = manage(new Label("Step (σ)", ALIGN_START));
+			auto sigma_label = manage(new Label("Step (σ₀)", ALIGN_START));
 			options->attach(*sigma_label, 0, row, 1, 1);
 			auto sigma_value = manage(new SpinButton{Adjustment::create(p->sigma, 0, 5, 0.01, 0.1), 0.1, 4});
 			options->attach(*sigma_value, 1, row++, 1, 1);
@@ -304,14 +306,14 @@ struct main_window : Gtk::ApplicationWindow {
 			resolv_box->get_style_context()->add_class(GTK_STYLE_CLASS_LINKED);
 			options->attach(*resolv_box, 1, row++, 1, 1);
 			RadioButton::Group res_group;
-			auto resolv_h1 = manage(new RadioButton{res_group, "H₁"});
+			auto resolv_h1 = manage(new RadioButton{res_group, "H¹"});
 			resolv_h1->set_mode(false);
 			resolv_box->pack_start(*resolv_h1);
-			auto resolv_l2 = manage(new RadioButton{res_group, "L₂"});
+			auto resolv_l2 = manage(new RadioButton{res_group, "L²"});
 			resolv_l2->set_mode(false);
 			resolv_box->pack_start(*resolv_l2);
 
-			auto delta_label = manage(new Label("L₂-mix (δ)", ALIGN_START));
+			auto delta_label = manage(new Label("L²-mix (δ)", ALIGN_START));
 			options->attach(*delta_label, 0, row, 1, 1);
 			auto delta_value = manage(new SpinButton{Adjustment::create(0.5, 0, 1, 0.1, 1), 0, 2});
 			options->attach(*delta_value, 1, row++, 1, 1);
@@ -621,7 +623,7 @@ struct app_t : Gtk::Application {
 			("constraints,c", value(&p->kernel_sizes)->default_value(p->kernel_sizes)->value_name("<list>"),
 				"List of kernel sizes, i.e. “1,7,4; 1,3,...,21; 2^2..8; 9” is a valid list")
 			("resolvent,r", value(&p->resolvent)->default_value(p->resolvent)->value_name("<res>"),
-				"Resolvent function to use, either “L2” for L₂ or “H1 <delta>” for H₁")
+				"Resolvent function to use, either “L2” for L² or “H1 <delta>” for H¹")
 			("max-steps,#", value(&p->max_steps)->default_value(p->max_steps)->value_name("<int>"),
 				"Maximum number of optimization steps")
 			("tolerance,e", value(&p->tolerance)->default_value(p->tolerance)->value_name("<float>"),
