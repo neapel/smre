@@ -602,6 +602,7 @@ struct app_t : Gtk::Application {
 		}
 
 		string output_file;
+		bool dump_steps;
 
 		options_description main_desc("Options");
 		main_desc.add_options()
@@ -610,7 +611,9 @@ struct app_t : Gtk::Application {
 			("input,i", value(&input_file)->value_name("<file>"),
 				"input image file (png,jpeg,…)")
 			("output,o", value(&output_file)->value_name("<file>"),
-				"output image file (png) → disables GUI");
+				"output image file (png) → disables GUI")
+			("dump-steps", bool_switch(&dump_steps),
+				"save output after each step to “<output>.step<int>.png” (CLI only)");
 		if(gpu_available) main_desc.add_options()
 			("cpu", value(&p->use_gpu)->implicit_value(false)->zero_tokens(),
 				"Use CPU/FFTW (default: GPU/OpenCL)");
@@ -690,8 +693,16 @@ struct app_t : Gtk::Application {
 		};
 		if(debug) {
 			size_t i = 0;
+			auto fmt = boost::format("%s.%05d.%s.png");
 			run_p->debug_cb = [&](const boost::multi_array<T,2> &a, string desc) {
-				multi_array_to_pixbuf(a)->save(str(boost::format("%s.%05d.%s.png") % output_file % (i++) % desc), "png");
+				multi_array_to_pixbuf(a)->save(str(fmt % output_file % (i++) % desc), "png");
+			};
+		}
+		if(dump_steps) {
+			auto fmt = boost::format("%s.step%05d.png");
+			run_p->current_cb = [&](const boost::multi_array<T, 2> &a, size_t step) {
+				multi_array_to_pixbuf(a)->save(str(fmt % output_file % step), "png");
+				return true;
 			};
 		}
 		auto output = run_p->run(input);
