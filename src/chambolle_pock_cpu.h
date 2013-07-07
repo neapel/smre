@@ -98,7 +98,7 @@ struct chambolle_pock_cpu : public impl<T> {
 				if(omp_get_thread_num() == 0)
 					this->progress(double(i * omp_get_num_threads()) / p.monte_carlo_steps, "Monte Carlo simulation for q");
 #else
-				this->progress(double(i) / p.monte_carlo_steps, "Monte Carlo simulation for q");
+				if(i % 10 == 0) this->progress(double(i) / p.monte_carlo_steps, "Monte Carlo simulation for q");
 #endif
 			}
 		});
@@ -216,7 +216,7 @@ struct chambolle_pock_cpu : public impl<T> {
 				debug(w, str(boost::format("w_%d") % i));
 			}
 			profile_pop();
-			this->progress(double(n) / p.max_steps, str(boost::format("Chambolle-Pock step %d") % n));
+			if(n % 10 == 0) this->progress(double(n) / p.max_steps, str(boost::format("Chambolle-Pock step %d") % n));
 
 			profile_push("(h) resolvent");
 				old_x = x;

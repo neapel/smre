@@ -93,7 +93,7 @@ struct chambolle_pock_gpu : public impl<T> {
 					auto k_q = norm_inf(convolved) - constraints[j].shift_q;
 					k_qs[j].push_back(k_q);
 				}
-				this->progress(double(i) / p.monte_carlo_steps, "Monte Carlo simulation for q");
+				if(i % 10 == 0) this->progress(double(i) / p.monte_carlo_steps, "Monte Carlo simulation for q");
 			}
 		});
 		for(auto &c : constraints)
@@ -213,10 +213,9 @@ struct chambolle_pock_gpu : public impl<T> {
 				profile_pop();
 				profile_pop(/*kernel*/);
 				debug(w, str(boost::format("w_%d") % i));
-				this->progress(double(n * constraints.size() + i) / (p.max_steps * constraints.size()),
-					str(boost::format("Chambolle-Pock step %d") % n));
 			}
 			profile_pop();
+			if(n % 10 == 0) this->progress(double(n) / p.max_steps, str(boost::format("Chambolle-Pock step %d") % n));
 
 			profile_push("(h) resolvent");
 				old_x = x;
