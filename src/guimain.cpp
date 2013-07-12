@@ -25,7 +25,7 @@ typedef float T;
 
 struct main_window : Gtk::ApplicationWindow {
 	shared_ptr<params<T>> p;
-	RefPtr<Pixbuf> input_image;
+	RefPtr<Pixbuf> input_image, output_image;
 	SpinButton q_value{Adjustment::create(p->force_q, 0, 100, 0.1, 1), 0, 3};
 	SpinButton stddev_value{Adjustment::create(1, 0, 10, 0.1, 1), 0, 2};
 
@@ -37,6 +37,9 @@ struct main_window : Gtk::ApplicationWindow {
 	Label progress_text;
 	Notebook notebook;
 	Image input_image_view, output_image_view;
+	int zoom_level{1};
+	RefPtr<Adjustment> hadjustment{Adjustment::create(0,0,0)};
+	RefPtr<Adjustment> vadjustment{Adjustment::create(0,0,0)};
 
 	struct cs : TreeModel::ColumnRecord {
 		TreeModelColumn<RefPtr<Pixbuf>> img, old_img;
@@ -51,13 +54,14 @@ struct main_window : Gtk::ApplicationWindow {
 	RefPtr<Action> run{Action::create("run", Stock::MEDIA_PLAY, "_Run")};
 	RefPtr<Action> stop{Action::create("stop", Stock::MEDIA_STOP, "S_top")};
 	RefPtr<ToggleAction> auto_run{ToggleAction::create("auto-run", Stock::REFRESH, "_Auto Run")};
+	RefPtr<Action> zoom_in{Action::create("zoom_in", Stock::ZOOM_IN, "Zoom _In")};
+	RefPtr<Action> zoom_out{Action::create("zoom_out", Stock::ZOOM_OUT, "Zoom _Out")};
 
 	struct debug_state {
 		RefPtr<Pixbuf> img;
 		string desc;
 	};
 	vector<debug_state> current_log, previous_log;
-	RefPtr<Pixbuf> current_output;
 
 	double progress_value;
 	string progress_desc;
@@ -108,7 +112,7 @@ struct main_window : Gtk::ApplicationWindow {
 				filter->add_pattern("*.png");
 				dialog.add_filter(filter);
 				if(dialog.run() == RESPONSE_OK) {
-					current_output->save(dialog.get_filename(), "png");
+					output_image->save(dialog.get_filename(), "png");
 				}
 			});
 
@@ -129,6 +133,17 @@ struct main_window : Gtk::ApplicationWindow {
 			toolbar->append(*auto_run->create_tool_item());
 			auto_run->signal_toggled().connect([=]{
 				validate();
+			});
+
+			toolbar->append(*zoom_in->create_tool_item());
+			zoom_in->signal_activate().connect([=]{
+				zoom_level++;
+				render();
+			});
+			toolbar->append(*zoom_out->create_tool_item());
+			zoom_out->signal_activate().connect([=]{
+				zoom_level--;
+				render();
 			});
 		}
 
@@ -440,10 +455,10 @@ struct main_window : Gtk::ApplicationWindow {
 		steps_view.override_background_color(notebook_bg);
 		paned->pack_start(notebook);
 		// Scroll-locked image views for comparison
-		auto original_scroll = manage(new ScrolledWindow());
+		auto original_scroll = manage(new ScrolledWindow(hadjustment, vadjustment));
 		original_scroll->add(input_image_view);
 		notebook.append_page(*original_scroll, "Input");
-		auto output_scroll = manage(new ScrolledWindow(original_scroll->get_hadjustment(), original_scroll->get_vadjustment()));
+		auto output_scroll = manage(new ScrolledWindow(hadjustment, vadjustment));
 		output_scroll->add(output_image_view);
 		notebook.append_page(*output_scroll, "Output");
 		// Debug details
@@ -470,9 +485,7 @@ struct main_window : Gtk::ApplicationWindow {
 
 		update_output.connect([&]{
 			Threads::Mutex::Lock lock(mutex);
-			output_image_view.set(current_output);
-			save_image->set_sensitive(true);
-			notebook.set_current_page(1);
+			render();
 		});
 
 		algorithm_done.connect([&]{
@@ -539,7 +552,7 @@ struct main_window : Gtk::ApplicationWindow {
 				if(live_display_value.get_active()) {
 					{
 						Threads::Mutex::Lock lock(mutex);
-						current_output = multi_array_to_pixbuf(a, auto_range_value.get_active());
+						output_image = multi_array_to_pixbuf(a, auto_range_value.get_active());
 					}
 					update_output();
 				}
@@ -553,7 +566,7 @@ struct main_window : Gtk::ApplicationWindow {
 			auto result = run_p->run(input);
 			q_value.set_value(run_p->q);
 			stddev_value.set_value(run_p->input_stddev);
-			current_output = multi_array_to_pixbuf(result, auto_range_value.get_active());
+			output_image = multi_array_to_pixbuf(result, auto_range_value.get_active());
 			update_output();
 			algorithm_done();
 		});
@@ -561,8 +574,8 @@ struct main_window : Gtk::ApplicationWindow {
 
 	void open(RefPtr<Pixbuf> image) {
 		input_image = image;
-		input_image_view.set(input_image);
-		output_image_view.set(input_image);
+		output_image.reset();
+		render();
 		validate();
 	}
 
@@ -570,6 +583,27 @@ struct main_window : Gtk::ApplicationWindow {
 		open(Pixbuf::create_from_file(filename));
 	}
 
+	RefPtr<Pixbuf> zoom_image(const RefPtr<Pixbuf> &img) const {
+		if(zoom_level == 1) return img;
+		return img->scale_simple(img->get_width() * zoom_level, img->get_height() * zoom_level, INTERP_NEAREST);
+	}
+
+	void render() {
+		zoom_in->set_sensitive(zoom_level < 8);
+		zoom_out->set_sensitive(zoom_level > 1);
+		input_image_view.set(zoom_image(input_image));
+		hadjustment->set_upper(input_image->get_width() * zoom_level);
+		vadjustment->set_upper(input_image->get_height() * zoom_level);
+		if(output_image) {
+			output_image_view.set(zoom_image(output_image));
+			save_image->set_sensitive(true);
+			notebook.set_current_page(1);
+		} else {
+			save_image->set_sensitive(false);
+			notebook.set_current_page(0);
+			output_image_view.clear();
+		}
+	}
 };
 
 
