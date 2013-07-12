@@ -32,11 +32,6 @@ struct chambolle_pock_gpu : public impl<T> {
 		  q(-1), shift_q(0) {}
 	};	
 
-	VEX_FUNCTION(soft_shrink, T(T, T),
-		"if(prm1 < -prm2) return prm1 + prm2;"
-		"if(prm1 > prm2) return prm1 - prm2;"
-		"return 0;");
-
 	const vex::Reductor<T, vex::MAX> max;
 	const vex::Reductor<T, vex::SUM> sum;
 
@@ -71,11 +66,11 @@ struct chambolle_pock_gpu : public impl<T> {
 	}
 
 	T norm_inf(const A &a) {
-		return max(fabs(a));
+		return max(abs(a));
 	}
 
 	T norm_1(const A &a) {
-		return sum(fabs(a));
+		return sum(abs(a));
 	}
 
 	void calc_q() {
@@ -196,7 +191,11 @@ struct chambolle_pock_gpu : public impl<T> {
 				debug(convolved, str(boost::format("convolved_%d") % i));
 				// calculate new y_i
 				profile_push("(d) soft_shrink");
-					c.y = soft_shrink(c.y + convolved * sigma, c.q * sigma * input_stddev);
+					c.y += convolved * sigma;
+					const auto q = c.q * sigma * input_stddev;
+					c.y = if_else(c.y < -q, c.y + q,
+					      if_else(c.y > q, c.y - q,
+							0));
 				profile_pop();
 				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel

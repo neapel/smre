@@ -37,12 +37,6 @@ struct chambolle_pock_cpu : public impl<T> {
 		: k_size(k_size), k(k), adj_k(adj_k), y(size), q(-1), shift_q(0) {}
 	};
 
-	inline T soft_shrink(T x, T q) {
-		if(x < -q) return x + q;
-		if(x > q) return x - q;
-		return 0;
-	}
-
 	T total_norm;
 	std::vector<constraint> constraints;
 	std::shared_ptr<resolvent_cpu<T>> resolv;
@@ -196,7 +190,12 @@ struct chambolle_pock_cpu : public impl<T> {
 				profile_push("(d) soft_shrink");
 					convolved *= sigma;
 					c.y += convolved;
-					for(auto row : c.y) for(auto &v : row) v = soft_shrink(v, c.q * sigma * input_stddev);
+					const auto q = c.q * sigma * input_stddev;
+					for(auto row : c.y) for(auto &v : row) {
+						if(v < -q) v += q;
+						else if(v > q) v -= q;
+						else v = 0;
+					}
 				profile_pop();
 				debug(c.y, str(boost::format("y_%d") % i));
 				// convolve y_i with conjugate transpose of kernel
