@@ -538,6 +538,8 @@ struct main_window : Gtk::ApplicationWindow {
 			// The image to process
 			auto input = pixbuf_to_multi_array(input_image);
 			p->set_size(input.shape());
+			auto start_q = p->force_q;
+			auto start_stddev = p->input_stddev;
 			auto run_p = p->runner();
 			have_run = true;
 			run_p->progress_cb = [=](double p, string d) {
@@ -564,8 +566,8 @@ struct main_window : Gtk::ApplicationWindow {
 					current_log.push_back(debug_state{multi_array_to_pixbuf(a), desc});
 				};
 			auto result = run_p->run(input);
-			q_value.set_value(run_p->q);
-			stddev_value.set_value(run_p->input_stddev);
+			if(run_p->q != start_q) q_value.set_value(run_p->q);
+			if(run_p->input_stddev != start_stddev) stddev_value.set_value(run_p->input_stddev);
 			output_image = multi_array_to_pixbuf(result, auto_range_value.get_active());
 			update_output();
 			algorithm_done();
