@@ -152,7 +152,7 @@ struct chambolle_pock_cpu : public impl<T> {
 		else
 			input_stddev = median_absolute_deviation(Y_);
 
-		this->debug(x, "x_in");
+		debug(x, "x_in");
 		for(auto &c : constraints) {
 			fill(c.y, 0);
 		}

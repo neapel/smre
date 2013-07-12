@@ -130,11 +130,6 @@ struct chambolle_pock_gpu : public impl<T> {
 			for(size_t i1 = 0 ; i1 < 20 ; i1++)
 				Y_[i0 + 20][i1 + 20] = 0;
 #endif
-		if(p.input_stddev >= 0)
-			input_stddev = p.input_stddev;
-		else
-			input_stddev = median_absolute_deviation(Y_);
-
 		profile_push("gpu run");
 		A Y(size_1d, Y_.data()), out(size_1d);
 		run(Y, out);
@@ -156,6 +151,11 @@ struct chambolle_pock_gpu : public impl<T> {
 			profile_pop();
 			initialized = true;
 		}
+
+		if(p.input_stddev >= 0)
+			input_stddev = p.input_stddev;
+		else
+			input_stddev = median_absolute_deviation(Y_);
 
 		debug(x, "x_in");
 		for(auto &c : constraints) {
